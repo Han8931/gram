@@ -1,0 +1,8 @@
+/target
+
+# Extracted from a copyrighted book — keep it local.
+/word_smart.epub
+/decks/
+
+# Local Claude Code settings.
+/.claude/settings.local.json

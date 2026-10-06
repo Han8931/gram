@@ -14,8 +14,8 @@ use crate::store;
 /// earns its place, `:nohlsearch` does not.
 pub const COMMANDS: &[&str] = &[
     "add", "b", "browse", "deck", "decks", "export", "forget", "h", "help", "import", "marked",
-    "noh", "q", "q!", "qa", "qa!", "quit", "rename", "reset", "s", "set", "stats", "status",
-    "study", "w", "wq", "write", "x",
+    "noh", "q", "q!", "qa", "qa!", "quit", "rename", "reset", "restore", "s", "set", "stats",
+    "status", "study", "w", "wq", "write", "x",
 ];
 
 /// Values for `:status` and `:marked`.
@@ -52,7 +52,8 @@ pub fn candidates(line: &str) -> (usize, Vec<String>) {
         "status" => prefixed(STATUSES, &token),
         "marked" | "mark" | "flagged" => prefixed(STATUSES, &token),
         "study" | "s" => prefixed(SCOPES, &token),
-        "import" | "export" => paths(&token),
+        // `:restore` also takes a plain number, which nothing can complete.
+        "import" | "export" | "restore" => paths(&token),
         // `:deck`, `:rename` and the rest take free text; nothing to offer.
         _ => Vec::new(),
     };

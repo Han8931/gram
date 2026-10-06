@@ -191,17 +191,18 @@ list. A `…` in the pane's border means the word has more text than fits;
 :status NAME            set this word's status (review|marked|test|none)
 :study NAME             drill one status
 :marked [NAME]          browse flagged words, or just one status
+:restore [N|FILE]       list kept collection backups, or put one back
 :study :browse :marked :stats :help
 ```
 
 `Tab` completes what you are typing: command names first, then their
 arguments — statuses for `:status` and `:marked`, scopes for `:study`, keys and
-values for `:set`, and file paths for `:import` and `:export`. The first press
-fills in as far as the candidates agree, so `:st`+`Tab` offers `stats`,
-`status` and `study` in a strip above the command line; after that each `Tab`
-steps to the next and `Shift-Tab` back. A completion that ends in `/` or `=` —
-a directory, or `grading=` — is left without a trailing space so the next
-`Tab` carries straight on into it.
+values for `:set`, and file paths for `:import`, `:export` and `:restore`. The
+first press fills in as far as the candidates agree, so `:st`+`Tab` offers
+`stats`, `status` and `study` in a strip above the command line; after that
+each `Tab` steps to the next and `Shift-Tab` back. A completion that ends in
+`/` or `=` — a directory, or `grading=` — is left without a trailing space so
+the next `Tab` carries straight on into it.
 
 ## Scheduling
 
@@ -261,7 +262,25 @@ If the collection on disk has changed since gram loaded it — `gram import` run
 in another terminal, or a second instance — the save keeps that version beside
 the collection as `collection.conflict-<date>-<time>.json` and says so, rather
 than overwriting it silently. The copy in the running program still wins: it is
-the one you have been studying.
+the one you have been studying. Repeated conflicts inside the same second get
+a counter (`…-203010-1.json`) so one backup never lands on another. If the
+copy cannot be made at all — a full or read-only directory — the save is
+refused and the error says so; nothing is overwritten that was not first kept.
+
+`:restore` lists those copies by stamp, newest first — the shared
+`collection.conflict-` … `.json` around them is left off, since it is the
+same for every one:
+
+```
+:restore                1: 20261006-203010-1  2: 20261006-203010
+:restore 1              put the newest one back
+:restore FILE           put any readable collection back
+```
+
+A restore asks before it acts, reads the backup before trusting it, and keeps
+whatever it displaces the same way — so restoring the wrong copy is itself
+undoable. It ends any session in progress: card ids from the old collection
+mean nothing against a different set of cards.
 
 Studying checkpoints itself every ten answers, on top of the save at the end of
 a session, so a crash or a closed terminal costs a few answers rather than the
@@ -366,7 +385,7 @@ and `*.epub` are both git-ignored for the same reason.
 ## Development
 
 ```sh
-cargo test                                   # 133 unit tests
+cargo test                                   # 138 unit tests
 python3 tools/drive_tui.py "s 3" 100 24      # render the TUI headlessly
 ```
 

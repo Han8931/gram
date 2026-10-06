@@ -1530,9 +1530,9 @@ EDITING A CARD
 
 COMMANDS
   Tab completes commands and their arguments — statuses, study scopes,
-  `:set` keys and values, and file paths for `:import` and `:export`. The
-  first press fills in as far as the choices agree; after that Tab steps
-  through them and Shift-Tab steps back.
+  `:set` keys and values, and file paths for `:import`, `:export` and
+  `:restore`. The first press fills in as far as the choices agree; after
+  that Tab steps through them and Shift-Tab steps back.
 
   :w             save the collection       :q          back / quit
   :wq  :x        save and quit             :qa         save and quit outright
@@ -1543,7 +1543,18 @@ COMMANDS
   :set new=20    new cards per day         :forget     reset this deck's schedule
   :set grading=binary|sm2                  :status NAME    set a word's status
   :study marked  drill one status          :marked NAME    browse one status
+  :restore       list kept copies          :restore N      put one back
   :study :browse :marked :stats :help
+
+SAVING AND RECOVERY
+  gram writes through a temp file and renames, so an interrupted save cannot
+  truncate the collection. If something else has written to the collection
+  since this session loaded it, that version is copied aside as
+  `collection.conflict-<date>-<time>.json` before yours replaces it; if the
+  copy cannot be made, the save is refused rather than losing their work.
+  `:restore` lists those copies by their stamp, newest first, and
+  `:restore 1` puts one back — keeping what it displaces the same way, so a
+  wrong restore is itself undoable. It ends any session in progress.
 
 SCHEDULING
   gram uses SM-2. Again resets the card and shows it again this session;

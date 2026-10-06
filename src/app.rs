@@ -3,7 +3,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Duration, Local, NaiveDate};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -242,6 +242,8 @@ pub enum ConfirmAction {
     DeleteDeck(u64),
     ForgetDeck(u64),
     DiscardAndQuit,
+    /// Replace the live collection with a kept copy.
+    Restore(PathBuf),
 }
 
 pub struct Confirm {
@@ -685,7 +687,16 @@ impl App {
         // being studied. But theirs is kept rather than lost.
         let on_disk = store::modified(&self.path);
         let conflict = if on_disk != self.written && on_disk.is_some() {
-            store::keep_conflicting_copy(&self.path).ok()
+            // If their version cannot be kept, do not overwrite it. A failed
+            // save leaves this session intact and recoverable; a save that
+            // clobbers an unread collection does not.
+            Some(store::keep_conflicting_copy(&self.path).with_context(|| {
+                format!(
+                    "{} changed on disk and that version could not be backed up, \
+                     so it was left alone",
+                    self.path.display()
+                )
+            })?)
         } else {
             None
         };
@@ -700,10 +711,10 @@ impl App {
         match self.save() {
             Ok(None) => {}
             Ok(Some(aside)) => self.error(format!(
-                "the collection had changed on disk — kept that version at {}",
-                aside.display()
+                "changed on disk — their version kept as {} (:restore)",
+                store::backup_label(&aside)
             )),
-            Err(err) => self.error(format!("save failed: {err}")),
+            Err(err) => self.error(format!("save failed: {err:#}")),
         }
     }
 
@@ -1034,7 +1045,7 @@ impl App {
             match self.save() {
                 Ok(_) => self.quit = true,
                 Err(err) => {
-                    self.error(format!("save failed: {err} — :q! to quit anyway"));
+                    self.error(format!("save failed: {err:#} — :q! to quit anyway"));
                 }
             }
         } else {
@@ -1132,6 +1143,135 @@ impl App {
                 self.dirty = false;
                 self.quit = true;
             }
+            ConfirmAction::Restore(backup) => self.restore(&backup),
+        }
+    }
+
+    /// `:restore` — put a kept copy back, or say which copies there are.
+    fn begin_restore(&mut self, rest: &str) {
+        // Newest first: the one worth restoring is almost always the last
+        // conflict, and it should be `1`.
+        let mut copies = store::conflict_copies(&self.path);
+        copies.reverse();
+
+        // The collection's own directory, which `gram path` prints — naming it
+        // here only costs the room the message needs.
+        let none_kept = "no kept copies beside the collection — nothing to restore";
+
+        if rest.is_empty() {
+            if copies.is_empty() {
+                self.error(none_kept);
+                return;
+            }
+            const SHOWN: usize = 5;
+            let listed = copies
+                .iter()
+                .take(SHOWN)
+                .enumerate()
+                .map(|(i, path)| format!("{}: {}", i + 1, store::backup_label(path)))
+                .collect::<Vec<_>>()
+                .join("  ");
+            // A status line holds only so much. Say what is not being shown
+            // rather than looking like a complete list — the hidden ones are
+            // still reachable by number.
+            let rest = match copies.len().saturating_sub(SHOWN) {
+                0 => String::new(),
+                n => format!(" (+{n} older, still :restore-able by number)"),
+            };
+            self.info(format!("{listed}{rest} — :restore <n> to put one back"));
+            return;
+        }
+
+        let chosen = match rest.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= copies.len() => copies[n - 1].clone(),
+            // `:restore 3` with two copies is a different mistake from
+            // `:restore 3` with none, and deserves a different answer.
+            Ok(_) if copies.is_empty() => {
+                self.error(none_kept);
+                return;
+            }
+            Ok(n) => {
+                self.error(format!(
+                    "no kept copy {n} — there {} — :restore lists them",
+                    match copies.len() {
+                        1 => "is 1".to_string(),
+                        many => format!("are {many}"),
+                    }
+                ));
+                return;
+            }
+            // Not a number, so it is a path: any file gram can read will do,
+            // which is how an external backup gets loaded.
+            Err(_) => match store::expand_tilde(rest) {
+                Ok(path) => path,
+                Err(err) => {
+                    self.error(format!("{err}"));
+                    return;
+                }
+            },
+        };
+        if !chosen.exists() {
+            self.error(format!("{} does not exist", chosen.display()));
+            return;
+        }
+
+        let name = store::backup_label(&chosen);
+        let prompt = if self.dirty {
+            format!("restore {name}, losing this session's unsaved answers? [y/N]")
+        } else {
+            format!("replace the collection with {name}? [y/N]")
+        };
+        self.confirm = Some(Confirm {
+            prompt,
+            action: ConfirmAction::Restore(chosen),
+        });
+    }
+
+    /// Write the backup over the collection and start again from it. Nothing
+    /// held about the old collection survives: ids in a session or an undo
+    /// stack mean nothing against a different set of cards.
+    fn restore(&mut self, backup: &Path) {
+        let displaced = match store::restore_from(backup, &self.path) {
+            Ok(displaced) => displaced,
+            Err(err) => {
+                self.error(format!("restore failed: {err:#}"));
+                return;
+            }
+        };
+        let db = match store::load_from(&self.path) {
+            Ok(db) => db,
+            Err(err) => {
+                self.error(format!("restored, but reloading failed: {err:#}"));
+                return;
+            }
+        };
+
+        self.db = db;
+        self.session = None;
+        self.editor = None;
+        self.last_answer = None;
+        self.deleted.clear();
+        self.browse_deck = 0;
+        self.browse_sel = 0;
+        self.filter.clear();
+        self.status_filter = StatusFilter::default();
+        self.decks_sel = 0;
+        self.card_scroll = 0;
+        self.screen = Screen::Decks;
+        self.written = store::modified(&self.path);
+        self.dirty = false;
+        self.refresh_rows();
+
+        let cards: usize = self.db.decks.iter().map(|deck| deck.cards.len()).sum();
+        let name = store::backup_label(backup);
+        match displaced {
+            // Stamps, not paths: a full path is the first thing the status
+            // line truncates away, and it is exactly the part you would need.
+            Some(aside) => self.info(format!(
+                "restored {name} — {cards} cards; old copy kept as {}",
+                store::backup_label(&aside)
+            )),
+            None => self.info(format!("restored {name} — {cards} cards")),
         }
     }
 
@@ -1715,14 +1855,15 @@ impl App {
                             // Someone else had written to it; say where their
                             // version went rather than just claiming success.
                             Some(aside) => self.error(format!(
-                                "written to {path} — the version already there is at {}",
-                                aside.display()
+                                "written to {path} — the version already there kept as {}",
+                                store::backup_label(&aside)
                             )),
                         }
                     }
-                    Err(err) => self.error(format!("save failed: {err}")),
+                    Err(err) => self.error(format!("save failed: {err:#}")),
                 }
             }
+            "restore" => self.begin_restore(rest),
             "q" | "quit" => {
                 if self.editor.is_some() {
                     self.close_editor();
@@ -2005,7 +2146,7 @@ impl App {
                     report.added, report.updated, report.skipped
                 ));
                 if let Err(err) = self.save() {
-                    self.error(format!("imported, but save failed: {err}"));
+                    self.error(format!("imported, but save failed: {err:#}"));
                 }
             }
             // `staged` is dropped with every change it accumulated.
@@ -2407,6 +2548,138 @@ mod tests {
 
         // Saving again is not a conflict: the last write was our own.
         assert!(app.save().unwrap().is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Keeping their version is the price of overwriting it. If the copy
+    /// cannot be made, refusing to save loses nothing — the session is still
+    /// here to retry — whereas writing anyway loses their collection.
+    #[test]
+    #[cfg(unix)]
+    fn a_save_that_cannot_keep_their_version_refuses_to_overwrite() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("gram-noconflict-{}", std::process::id()));
+        let writable = |mode: u32| {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode));
+        };
+        // An earlier failure can leave this directory unwritable, which would
+        // make every later run fail for the wrong reason.
+        writable(0o700);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("collection.json");
+
+        let mut app = app_with_cards(2);
+        app.path = path.clone();
+        app.written = store::modified(&path);
+
+        let theirs = r#"{"decks":[{"id":9,"name":"theirs","cards":[]}]}"#;
+        std::fs::write(&path, theirs).unwrap();
+
+        // A directory nothing can be created in is the simplest way to make
+        // the backup fail. Root ignores the mode, so check before trusting it.
+        writable(0o500);
+        if std::fs::write(dir.join("probe"), "").is_ok() {
+            writable(0o700);
+            let _ = std::fs::remove_dir_all(&dir);
+            return; // running as root; there is nothing to test
+        }
+
+        // Nothing may panic while the directory is locked, or the next run
+        // inherits it — so the save happens here and the asserts come after.
+        app.dirty = true;
+        let outcome = app.save();
+        writable(0o700);
+
+        let err = outcome.expect_err("the save must not go through");
+        assert!(
+            format!("{err:#}").contains("could not be backed up"),
+            "the error says why: {err:#}"
+        );
+        assert!(app.dirty, "and the session still knows it is unsaved");
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            theirs,
+            "their collection is untouched"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn restore_puts_a_kept_copy_back() {
+        let dir = std::env::temp_dir().join(format!("gram-apprestore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("collection.json");
+
+        let mut app = app_with_cards(3);
+        app.path = path.clone();
+        app.written = None;
+
+        // Something else writes a collection, so saving keeps theirs aside.
+        let mut theirs = Db::default();
+        let index = theirs.add_deck("theirs".into());
+        theirs.decks[index].cards.push(Card::new(
+            1,
+            "abash".into(),
+            "to embarrass".into(),
+            app.today,
+        ));
+        store::save_to(&theirs, &path).unwrap();
+        let aside = app.save().unwrap().expect("a conflict");
+
+        // With a session open and ids in flight, to prove a restore clears it.
+        app.start_session(DECK, Scope::Due);
+        assert!(app.session.is_some());
+
+        // `:restore` on its own only reports what there is.
+        typed(&mut app, "restore");
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.confirm.is_none(), "listing asks nothing");
+        assert!(
+            app.status.text.contains(&store::backup_label(&aside)),
+            "it names the copy: {:?}",
+            app.status.text
+        );
+        assert_eq!(app.db.decks[0].name, "test", "and changes nothing");
+
+        // `:restore 1` asks first, and n is a no.
+        typed(&mut app, "restore 1");
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.confirm.is_some(), "a restore is confirmed");
+        app.on_key(key('n')).unwrap();
+        assert_eq!(app.db.decks[0].name, "test", "declined, nothing moved");
+
+        typed(&mut app, "restore 1");
+        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        app.on_key(key('y')).unwrap();
+
+        assert_eq!(app.db.decks.len(), 1);
+        assert_eq!(app.db.decks[0].name, "theirs", "their deck is live now");
+        assert_eq!(app.db.decks[0].cards[0].term, "abash");
+        assert!(app.session.is_none(), "a session over other cards is ended");
+        assert_eq!(app.screen, Screen::Decks);
+        assert!(!app.dirty, "the restored collection is what is on disk");
+        assert_eq!(
+            store::load_from(&path).unwrap().decks[0].name,
+            "theirs",
+            "and it was written, not just loaded"
+        );
+
+        // Our own collection was kept on the way out, so this is reversible.
+        let kept = store::conflict_copies(&path);
+        assert!(
+            kept.iter()
+                .any(|p| store::load_from(p)
+                    .is_ok_and(|db| db.decks.iter().any(|d| d.name == "test"))),
+            "what the restore displaced is still there: {kept:?}"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

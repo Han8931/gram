@@ -83,12 +83,128 @@ pub fn save_to(db: &Db, path: &Path) -> Result<()> {
 /// where it went. Used when the file on disk turns out to be someone else's
 /// newer version: overwriting it is still the right call — this copy of the
 /// collection is the one being studied — but it should not be unrecoverable.
+///
+/// Two conflicts in the same second must not land on the same name, or the
+/// second copy destroys the thing the first one was saved to protect. The
+/// stamp is only the starting point; a taken name gets a counter.
 pub fn keep_conflicting_copy(path: &Path) -> Result<PathBuf> {
     let stamp = Local::now().format("%Y%m%d-%H%M%S");
-    let aside = path.with_extension(format!("conflict-{stamp}.json"));
-    fs::copy(path, &aside)
-        .with_context(|| format!("copying {} to {}", path.display(), aside.display()))?;
-    Ok(aside)
+    for attempt in 0..1000 {
+        let aside = match attempt {
+            0 => path.with_extension(format!("conflict-{stamp}.json")),
+            n => path.with_extension(format!("conflict-{stamp}-{n}.json")),
+        };
+        // `create_new` fails rather than truncating when the name is taken, so
+        // claiming the name and finding it free are one step — nothing between
+        // them for another gram to slip into.
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&aside)
+        {
+            Ok(_) => {
+                if let Err(err) = fs::copy(path, &aside) {
+                    // The name is reserved by an empty file at this point.
+                    // Leaving it would offer `:restore` an empty collection
+                    // that looks like a real backup.
+                    let _ = fs::remove_file(&aside);
+                    return Err(err).with_context(|| {
+                        format!("copying {} to {}", path.display(), aside.display())
+                    });
+                }
+                return Ok(aside);
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| format!("creating backup {}", aside.display()));
+            }
+        }
+    }
+    bail!(
+        "cannot find an unused backup name beside {}",
+        path.display()
+    )
+}
+
+/// The part of a backup's name that says which backup it is. Every one of
+/// them starts `collection.conflict-` and ends `.json`, so repeating that in a
+/// status line only costs the room the stamp needs. Anything not shaped like a
+/// backup keeps its file name.
+pub fn backup_label(path: &Path) -> String {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    match name.rsplit_once(".json") {
+        Some((before, "")) => match before.rsplit_once(".conflict-") {
+            Some((_, stamp)) => stamp.to_string(),
+            None => name.into_owned(),
+        },
+        _ => name.into_owned(),
+    }
+}
+
+/// Where a backup falls in time: its stamp, then its counter. Sorting the
+/// names as text would get this wrong — `-1` sorts before `.json`, putting the
+/// second copy of a second ahead of the first.
+fn backup_order(name: &str) -> (String, u32) {
+    let stamped = name
+        .rsplit_once(".json")
+        .map_or(name, |(before, _)| before)
+        .rsplit_once("conflict-")
+        .map_or(name, |(_, after)| after);
+    // `YYYYMMDD-HHMMSS`, optionally followed by `-<n>`.
+    let mut parts = stamped.splitn(3, '-');
+    let date = parts.next().unwrap_or_default();
+    let time = parts.next().unwrap_or_default();
+    let counter = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
+    (format!("{date}-{time}"), counter)
+}
+
+/// Conflict copies sitting beside the collection, oldest first.
+pub fn conflict_copies(path: &Path) -> Vec<PathBuf> {
+    let Some(parent) = path.parent() else {
+        return Vec::new();
+    };
+    let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let prefix = format!("{stem}.conflict-");
+    let mut found: Vec<PathBuf> = match fs::read_dir(parent) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|p| {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().starts_with(&prefix))
+                    .unwrap_or(false)
+                    && p.extension().and_then(|e| e.to_str()) == Some("json")
+            })
+            .collect(),
+        Err(_) => return Vec::new(),
+    };
+    found
+        .sort_by_cached_key(|p| backup_order(&p.file_name().unwrap_or_default().to_string_lossy()));
+    found
+}
+
+/// Put a kept copy back as the live collection, saving what is there now so a
+/// mistaken restore is itself recoverable. Returns where the displaced
+/// collection went, when there was one.
+pub fn restore_from(backup: &Path, path: &Path) -> Result<Option<PathBuf>> {
+    // An empty file loads as an empty collection, which would read as a
+    // successful restore while wiping every deck. Refuse it by name.
+    if fs::metadata(backup).map(|m| m.len() == 0).unwrap_or(false) {
+        bail!(
+            "{} is empty — there is nothing in it to restore",
+            backup.display()
+        );
+    }
+    // Parse it before trusting it: restoring an unreadable file would replace
+    // a working collection with one gram cannot open.
+    let db = load_from(backup).with_context(|| format!("reading {}", backup.display()))?;
+    let displaced = if path.exists() {
+        Some(keep_conflicting_copy(path)?)
+    } else {
+        None
+    };
+    save_to(&db, path)?;
+    Ok(displaced)
 }
 
 /// Columns we recognise, by header name.
@@ -430,6 +546,103 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(left, vec!["collection.json".to_string()]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Two conflicts inside the same second must not share a name: the second
+    /// backup would otherwise destroy the collection the first one saved.
+    #[test]
+    fn repeated_conflicts_each_get_their_own_name() {
+        let dir = std::env::temp_dir().join(format!("gram-conflict2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("collection.json");
+
+        fs::write(&path, r#"{"decks":[{"id":1,"name":"first","cards":[]}]}"#).unwrap();
+        let first = keep_conflicting_copy(&path).unwrap();
+        fs::write(&path, r#"{"decks":[{"id":2,"name":"second","cards":[]}]}"#).unwrap();
+        let second = keep_conflicting_copy(&path).unwrap();
+        fs::write(&path, r#"{"decks":[{"id":3,"name":"third","cards":[]}]}"#).unwrap();
+        let third = keep_conflicting_copy(&path).unwrap();
+
+        assert_ne!(first, second);
+        assert_ne!(second, third);
+        assert_eq!(load_from(&first).unwrap().decks[0].name, "first");
+        assert_eq!(load_from(&second).unwrap().decks[0].name, "second");
+        assert_eq!(load_from(&third).unwrap().decks[0].name, "third");
+
+        let found = conflict_copies(&path);
+        assert_eq!(found.len(), 3, "all three are listed: {found:?}");
+        assert_eq!(found[0], first, "and the oldest sorts first");
+        assert!(
+            !found.contains(&path),
+            "the collection itself is not a backup"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_backup_is_labelled_by_its_stamp() {
+        let at = |name: &str| backup_label(&PathBuf::from("/data/gram").join(name));
+        assert_eq!(
+            at("collection.conflict-20261006-120000.json"),
+            "20261006-120000"
+        );
+        assert_eq!(
+            at("collection.conflict-20261006-120000-3.json"),
+            "20261006-120000-3",
+            "the counter is part of which backup it is"
+        );
+        // Anything not shaped like one keeps its name, so `:restore some.json`
+        // still reports something recognisable.
+        assert_eq!(at("some.json"), "some.json");
+        assert_eq!(at("collection.json"), "collection.json");
+        assert_eq!(at("notes.txt"), "notes.txt");
+    }
+
+    #[test]
+    fn restoring_keeps_what_it_displaces() {
+        let dir = std::env::temp_dir().join(format!("gram-restore-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("collection.json");
+
+        let backup = dir.join("kept.json");
+        fs::write(&backup, r#"{"decks":[{"id":7,"name":"kept","cards":[]}]}"#).unwrap();
+        fs::write(&path, r#"{"decks":[{"id":1,"name":"live","cards":[]}]}"#).unwrap();
+
+        let displaced = restore_from(&backup, &path)
+            .unwrap()
+            .expect("one was there");
+        assert_eq!(load_from(&path).unwrap().decks[0].name, "kept");
+        assert_eq!(
+            load_from(&displaced).unwrap().decks[0].name,
+            "live",
+            "a mistaken restore is itself undoable"
+        );
+
+        // A backup gram cannot parse is refused before anything is replaced.
+        let broken = dir.join("broken.json");
+        fs::write(&broken, "{ not json").unwrap();
+        assert!(restore_from(&broken, &path).is_err());
+        assert_eq!(
+            load_from(&path).unwrap().decks[0].name,
+            "kept",
+            "the collection is left alone"
+        );
+
+        // So is an empty one: it loads as an empty collection, so restoring it
+        // would read as a success while wiping every deck.
+        let empty = dir.join("empty.json");
+        fs::write(&empty, "").unwrap();
+        assert!(restore_from(&empty, &path).is_err());
+        assert_eq!(
+            load_from(&path).unwrap().decks[0].name,
+            "kept",
+            "still there"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

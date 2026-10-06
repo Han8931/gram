@@ -350,6 +350,13 @@ python3 tools/extract_wordsmart.py word_smart.epub decks/   # 832 + 33 cards
 python3 tools/extract_toefl.py toefl_vocab.epub decks/      # 799 cards
 ```
 
+A CSV under `decks/` is not yet a deck: nothing is bundled, and the deck list
+shows your collection, not the directory. Import what you want to study.
+
+```sh
+gram import decks/toefl_power_vocab.csv "TOEFL Power Vocab"
+```
+
 **Word Smart.** Reads the A–Z chapters and the foreign-phrases chapter,
 splitting each headword paragraph into term, pronunciation, part of speech and
 definition, then attaching the bulleted example sentences and the follow-on

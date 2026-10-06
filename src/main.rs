@@ -1,6 +1,7 @@
 //! gram — a Vim-flavoured spaced-repetition vocabulary trainer for the terminal.
 
 mod app;
+mod complete;
 mod model;
 mod store;
 mod textinput;
@@ -66,6 +67,7 @@ fn run_tui() -> Result<()> {
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     while !app.quit {
+        app.refresh_today();
         terminal.draw(|frame| ui::render(frame, app))?;
         match event::read()? {
             Event::Key(key) => app.on_key(key)?,
@@ -86,12 +88,20 @@ fn cmd_decks() -> Result<()> {
         return Ok(());
     }
     let today = Local::now().date_naive();
-    println!("{:<30} {:>6} {:>6} {:>6} {:>8}", "DECK", "NEW", "LEARN", "DUE", "TOTAL");
+    println!(
+        "{:<30} {:>6} {:>6} {:>6} {:>8}  STATUS",
+        "DECK", "NEW", "LEARN", "DUE", "TOTAL"
+    );
     for deck in &db.decks {
         let counts = deck.counts(today);
         println!(
-            "{:<30} {:>6} {:>6} {:>6} {:>8}",
-            deck.name, counts.new, counts.learning, counts.due, counts.total
+            "{:<30} {:>6} {:>6} {:>6} {:>8}  {}",
+            deck.name,
+            counts.new,
+            counts.learning,
+            counts.due,
+            counts.total,
+            counts.status().label()
         );
     }
     Ok(())

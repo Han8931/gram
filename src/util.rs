@@ -1,6 +1,10 @@
-//! Small helpers: a seeded shuffle and interval formatting.
+//! Small helpers: a seeded shuffle, interval formatting, and the text
+//! measuring every layout in [`crate::ui`] depends on.
 
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// xorshift64* — enough randomness to shuffle a study queue, no dependency.
 pub struct Rng(u64);
@@ -15,7 +19,11 @@ impl Rng {
     }
 
     pub fn seeded(seed: u64) -> Self {
-        Self(if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed })
+        Self(if seed == 0 {
+            0x9E37_79B9_7F4A_7C15
+        } else {
+            seed
+        })
     }
 
     pub fn next_u64(&mut self) -> u64 {
@@ -88,9 +96,112 @@ pub fn split_emphasis(text: &str) -> Vec<(&str, bool)> {
     runs
 }
 
+// -- measuring text -------------------------------------------------------
+//
+// A terminal lays out columns, not characters. `한` takes two of them, a
+// combining accent takes none, and counting `chars()` instead gets tables,
+// truncation and the cursor wrong by exactly that difference.
+
+/// Columns `text` occupies on screen.
+pub fn width(text: &str) -> usize {
+    UnicodeWidthStr::width(text)
+}
+
+/// The text as user-perceived characters: `e` + `◌́` is one, not two.
+pub fn clusters(text: &str) -> impl Iterator<Item = &str> {
+    text.graphemes(true)
+}
+
+/// How many clusters `text` is.
+pub fn cluster_count(text: &str) -> usize {
+    clusters(text).count()
+}
+
+/// Byte offset where cluster `index` starts, or the length when past the end.
+pub fn cluster_offset(text: &str, index: usize) -> usize {
+    text.grapheme_indices(true)
+        .nth(index)
+        .map(|(offset, _)| offset)
+        .unwrap_or(text.len())
+}
+
+/// Truncate to `columns`, adding an ellipsis when it cuts. Never splits a
+/// double-width character down the middle.
+pub fn truncate(text: &str, columns: usize) -> String {
+    if width(text) <= columns {
+        return text.to_string();
+    }
+    if columns <= 1 {
+        return "…".to_string();
+    }
+    let mut out = String::new();
+    let mut used = 0;
+    // One column is kept back for the ellipsis.
+    for cluster in clusters(text) {
+        let next = width(cluster);
+        if used + next > columns - 1 {
+            break;
+        }
+        out.push_str(cluster);
+        used += next;
+    }
+    out.push('…');
+    out
+}
+
+/// Truncate to `columns`, then pad with spaces to exactly that many — what a
+/// table column needs, and what `{:<width$}` cannot do.
+pub fn pad(text: &str, columns: usize) -> String {
+    let mut out = truncate(text, columns);
+    let padding = columns.saturating_sub(width(&out));
+    out.extend(std::iter::repeat_n(' ', padding));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Korean, a combining accent, and an emoji: two columns, zero, two.
+    #[test]
+    fn width_counts_columns_not_characters() {
+        assert_eq!(width("abash"), 5);
+        assert_eq!(width("한국어"), 6, "three wide characters");
+        assert_eq!(width("e\u{301}"), 1, "e plus a combining acute");
+        assert_eq!(width("naïveté"), 7);
+    }
+
+    #[test]
+    fn clusters_hold_combining_marks_together() {
+        assert_eq!(cluster_count("e\u{301}te\u{301}"), 3, "é t é, five chars");
+        assert_eq!(cluster_count("한국어"), 3);
+        let text = "e\u{301}x";
+        assert_eq!(cluster_offset(text, 1), 3, "past e and its accent");
+        assert_eq!(cluster_offset(text, 9), text.len(), "past the end");
+    }
+
+    #[test]
+    fn truncate_measures_in_columns() {
+        assert_eq!(truncate("abash", 10), "abash");
+        assert_eq!(truncate("circumlocution", 8), "circuml…");
+        assert_eq!(truncate("abc", 1), "…");
+
+        // Three wide characters are six columns, so five columns fit one of
+        // them plus the ellipsis — not two characters and an overflow.
+        assert_eq!(truncate("한국어", 6), "한국어");
+        assert_eq!(truncate("한국어", 5), "한국…");
+        assert_eq!(width(&truncate("한국어", 5)), 5);
+        assert_eq!(truncate("한국어", 4), "한…");
+        assert_eq!(width(&truncate("한국어", 4)), 3, "never splits one in half");
+    }
+
+    #[test]
+    fn pad_fills_to_the_column() {
+        assert_eq!(pad("abash", 8), "abash   ");
+        assert_eq!(width(&pad("한국어", 8)), 8, "wide text pads less");
+        assert_eq!(width(&pad("e\u{301}", 4)), 4, "and zero-width text more");
+        assert_eq!(width(&pad("circumlocution", 8)), 8, "long text is cut");
+    }
 
     #[test]
     fn shuffle_preserves_every_element() {

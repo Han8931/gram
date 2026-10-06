@@ -10,6 +10,10 @@ csv = "1.4.0"
 ratatui = "0.30.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+# Terminals measure columns, not characters: 한 is two columns wide and a
+# combining accent is none. Both already ship inside ratatui.
+unicode-segmentation = "1.13.3"
+unicode-width = "0.2.2"
 
 [profile.release]
 opt-level = 3

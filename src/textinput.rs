@@ -1,6 +1,14 @@
 //! A single-line text field with Vim-style cursor motions.
 //!
-//! The cursor is a *character* index, so multi-byte input behaves sanely.
+//! The cursor counts grapheme clusters — what a reader calls a character — so
+//! a letter and the accent on it move, and delete, as one.
+
+use crate::util;
+
+/// Whitespace, as a cluster.
+fn is_space(cluster: &str) -> bool {
+    cluster.chars().all(char::is_whitespace)
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TextInput {
@@ -11,7 +19,7 @@ pub struct TextInput {
 impl TextInput {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
-        let cursor = value.chars().count();
+        let cursor = util::cluster_count(&value);
         Self { value, cursor }
     }
 
@@ -23,8 +31,12 @@ impl TextInput {
         self.cursor
     }
 
+    fn clusters(&self) -> Vec<&str> {
+        util::clusters(&self.value).collect()
+    }
+
     pub fn len(&self) -> usize {
-        self.value.chars().count()
+        util::cluster_count(&self.value)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -41,13 +53,9 @@ impl TextInput {
         std::mem::take(&mut self.value)
     }
 
-    /// Byte offset of character index `index`.
+    /// Byte offset where cluster `index` starts.
     fn byte_at(&self, index: usize) -> usize {
-        self.value
-            .char_indices()
-            .nth(index)
-            .map(|(offset, _)| offset)
-            .unwrap_or(self.value.len())
+        util::cluster_offset(&self.value, index)
     }
 
     // -- editing ---------------------------------------------------------
@@ -55,7 +63,10 @@ impl TextInput {
     pub fn insert(&mut self, ch: char) {
         let at = self.byte_at(self.cursor);
         self.value.insert(at, ch);
-        self.cursor += 1;
+        // A combining mark joins the letter before it instead of becoming a
+        // cluster of its own, so count the clusters rather than assume one
+        // more of them.
+        self.cursor = util::cluster_count(&self.value[..at + ch.len_utf8()]);
     }
 
     #[cfg(test)]
@@ -63,6 +74,14 @@ impl TextInput {
         for ch in text.chars() {
             self.insert(ch);
         }
+    }
+
+    /// Replace everything from character `at` onwards, leaving the cursor at
+    /// the end. How Tab completion swaps in a candidate.
+    pub fn replace_from(&mut self, at: usize, text: &str) {
+        let start = self.byte_at(at);
+        self.value.replace_range(start.., text);
+        self.cursor = self.len();
     }
 
     /// Backspace.
@@ -88,12 +107,12 @@ impl TextInput {
 
     /// `Ctrl-W` — delete the word before the cursor.
     pub fn delete_word_back(&mut self) {
-        let chars: Vec<char> = self.value.chars().collect();
+        let parts = self.clusters();
         let mut at = self.cursor;
-        while at > 0 && chars[at - 1].is_whitespace() {
+        while at > 0 && is_space(parts[at - 1]) {
             at -= 1;
         }
-        while at > 0 && !chars[at - 1].is_whitespace() {
+        while at > 0 && !is_space(parts[at - 1]) {
             at -= 1;
         }
         let start = self.byte_at(at);
@@ -148,25 +167,25 @@ impl TextInput {
 
     /// `w` — start of the next word.
     pub fn word_forward(&mut self) {
-        let chars: Vec<char> = self.value.chars().collect();
+        let parts = self.clusters();
         let mut at = self.cursor;
-        while at < chars.len() && !chars[at].is_whitespace() {
+        while at < parts.len() && !is_space(parts[at]) {
             at += 1;
         }
-        while at < chars.len() && chars[at].is_whitespace() {
+        while at < parts.len() && is_space(parts[at]) {
             at += 1;
         }
-        self.cursor = at.min(chars.len());
+        self.cursor = at.min(parts.len());
     }
 
     /// `b` — start of the previous word.
     pub fn word_back(&mut self) {
-        let chars: Vec<char> = self.value.chars().collect();
+        let parts = self.clusters();
         let mut at = self.cursor;
-        while at > 0 && chars[at - 1].is_whitespace() {
+        while at > 0 && is_space(parts[at - 1]) {
             at -= 1;
         }
-        while at > 0 && !chars[at - 1].is_whitespace() {
+        while at > 0 && !is_space(parts[at - 1]) {
             at -= 1;
         }
         self.cursor = at;
@@ -195,6 +214,35 @@ mod tests {
         input.home();
         input.delete_under();
         assert_eq!(input.value(), "aïv");
+    }
+
+    #[test]
+    fn an_accent_belongs_to_the_letter_it_sits_on() {
+        let mut input = TextInput::default();
+        input.insert('e');
+        input.insert('\u{301}'); // combining acute
+        assert_eq!(input.value(), "e\u{301}");
+        assert_eq!(input.len(), 1, "é is one character to a reader");
+        assert_eq!(input.cursor(), 1, "and the cursor is past it, not inside");
+
+        input.delete_back();
+        assert_eq!(input.value(), "", "backspace takes the whole letter");
+    }
+
+    #[test]
+    fn korean_counts_as_one_character_each() {
+        let mut input = TextInput::new("한국어");
+        assert_eq!(input.len(), 3);
+        assert_eq!(input.cursor(), 3);
+
+        input.delete_back();
+        assert_eq!(input.value(), "한국");
+
+        input.home();
+        input.right(true);
+        input.insert('글');
+        assert_eq!(input.value(), "한글국");
+        assert_eq!(input.cursor(), 2);
     }
 
     #[test]

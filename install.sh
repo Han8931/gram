@@ -102,6 +102,14 @@ case ":${PATH}:" in
 esac
 
 say ""
-say "Then, from anywhere:"
-say "  gram import $repo/decks/word_smart.csv \"Word Smart\""
-say "  gram"
+if [ -f "$repo/decks/word_smart.csv" ]; then
+	say "Then, from anywhere:"
+	say "  gram import $repo/decks/word_smart.csv \"Word Smart\""
+	say "  gram"
+else
+	say "No decks yet. Build them from your own copy of the book:"
+	say "  python3 $repo/tools/extract_wordsmart.py word_smart.epub $repo/decks/"
+	say "  gram import $repo/decks/word_smart.csv \"Word Smart\""
+	say ""
+	say "Or import any CSV of your own: gram import words.csv"
+fi

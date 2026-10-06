@@ -14,8 +14,26 @@ import re
 import select
 import sys
 import time
+import unicodedata
 
 COLS, ROWS = 100, 30
+
+# An escape sequence that has started but not yet finished, so it must wait for
+# the next read rather than being treated as literal text.
+INCOMPLETE = re.compile(
+    r"""\x1b$                      # a lone ESC
+      | \x1b\[[0-9;?]*$            # CSI, parameters not yet terminated
+      | \x1b[\]P](?:(?!\x07|\x1b\\).)*$   # OSC/DCS still waiting for its end
+    """,
+    re.X | re.S,
+)
+
+
+def columns(ch):
+    """Terminal columns a character occupies: 한 is two, an accent is none."""
+    if unicodedata.combining(ch):
+        return 0
+    return 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
 
 
 class Screen:
@@ -28,26 +46,56 @@ class Screen:
     def clear(self):
         self.grid = [[" "] * self.cols for _ in range(self.rows)]
         self.x = self.y = 0
+        self.pending = ""
 
     def put(self, ch):
+        wide = columns(ch)
+        if wide == 0:
+            # A combining mark belongs to the cell before it.
+            if self.y < self.rows and 0 < self.x <= self.cols:
+                self.grid[self.y][self.x - 1] += ch
+            return
         if self.y < self.rows and self.x < self.cols:
+            self.split_wide(self.x)
             self.grid[self.y][self.x] = ch
-        self.x += 1
+            # A double-width character covers the next cell too, which must
+            # hold nothing of its own or the row grows by a column.
+            if wide == 2 and self.x + 1 < self.cols:
+                self.split_wide(self.x + 1)
+                self.grid[self.y][self.x + 1] = ""
+        self.x += wide
+
+    def split_wide(self, x):
+        """Writing over half of a double-width character blanks the other half,
+        the way a terminal does — otherwise the row loses or gains a column."""
+        row = self.grid[self.y]
+        if row[x] == "" and x > 0:
+            row[x - 1] = " "
+        elif x + 1 < self.cols and row[x + 1] == "":
+            row[x + 1] = " "
 
     def feed(self, data):
+        # A read can end mid-escape-sequence. Carry the tail over to the next
+        # chunk instead of printing its parameters as text.
+        data = self.pending + data
+        self.pending = ""
         i = 0
         while i < len(data):
             ch = data[i]
             if ch == "\x1b":
-                m = re.match(r"\x1b\[([0-9;?]*)([A-Za-z])", data[i:])
+                rest = data[i:]
+                m = re.match(r"\x1b\[([0-9;?]*)([A-Za-z])", rest)
                 if m:
                     self.csi(m.group(1), m.group(2))
                     i += m.end()
                     continue
-                m = re.match(r"\x1b[\]P].*?(\x07|\x1b\\)", data[i:], re.S)
+                m = re.match(r"\x1b[\]P].*?(\x07|\x1b\\)", rest, re.S)
                 if m:
                     i += m.end()
                     continue
+                if INCOMPLETE.match(rest):
+                    self.pending = rest
+                    return
                 i += 2
                 continue
             if ch == "\r":
@@ -94,10 +142,21 @@ def main():
     cols = int(sys.argv[2]) if len(sys.argv) > 2 else COLS
     rows = int(sys.argv[3]) if len(sys.argv) > 3 else ROWS
 
+    # Whichever build exists; $GRAM_BIN overrides. Release first, since that is
+    # what the README tells you to build.
+    binary = os.environ.get("GRAM_BIN")
+    if not binary:
+        for candidate in ("./target/release/gram", "./target/debug/gram"):
+            if os.access(candidate, os.X_OK):
+                binary = candidate
+                break
+    if not binary:
+        sys.exit("no gram binary — run `cargo build --release` first")
+
     pid, fd = pty.fork()
     if pid == 0:
         os.environ["TERM"] = "xterm-256color"
-        os.execvp("./target/debug/gram", ["gram"])
+        os.execvp(binary, ["gram"])
 
     import fcntl
     import struct
@@ -133,7 +192,8 @@ def main():
 
     os.write(fd, b"\x1b")
     time.sleep(0.05)
-    os.write(fd, b":q!\r")
+    # `:q!` asks before discarding unsaved answers, so answer it.
+    os.write(fd, b":q!\ry")
     time.sleep(0.2)
     try:
         os.close(fd)

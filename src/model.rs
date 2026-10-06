@@ -7,6 +7,11 @@ pub const DEFAULT_EASE: f32 = 2.5;
 pub const MIN_EASE: f32 = 1.3;
 pub const MAX_INTERVAL: u32 = 36_500;
 
+/// Answers kept in the review log. The log is only read for the recent-history
+/// chart and the retention ratio, so old entries are dropped rather than
+/// letting the collection file grow without bound.
+pub const MAX_LOG: usize = 50_000;
+
 fn default_ease() -> f32 {
     DEFAULT_EASE
 }
@@ -109,6 +114,78 @@ impl Grade {
     }
 }
 
+/// A word's study status — yours to set, cycled with `m`.
+///
+/// Deliberately separate from [`CardState`]: that one belongs to the
+/// scheduler and only moves when you answer a card, whereas this is a label
+/// you put on a word and take off again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Study {
+    /// No status.
+    #[default]
+    None,
+    /// Worth another look.
+    Review,
+    /// In the study pile.
+    Marked,
+    /// Queued up to test yourself on.
+    Test,
+}
+
+impl Study {
+    /// The order `m` steps through. `None` is in the cycle so a status can
+    /// always be taken off again.
+    pub const CYCLE: [Study; 4] = [Study::None, Study::Review, Study::Marked, Study::Test];
+
+    pub fn next(self) -> Self {
+        let at = Self::CYCLE.iter().position(|s| *s == self).unwrap_or(0);
+        Self::CYCLE[(at + 1) % Self::CYCLE.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let at = Self::CYCLE.iter().position(|s| *s == self).unwrap_or(0);
+        Self::CYCLE[(at + Self::CYCLE.len() - 1) % Self::CYCLE.len()]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "—",
+            Self::Review => "review",
+            Self::Marked => "marked",
+            Self::Test => "test",
+        }
+    }
+
+    /// One column wide, for the review screen and tight listings.
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::None => " ",
+            Self::Review => "◆",
+            Self::Marked => "★",
+            Self::Test => "▲",
+        }
+    }
+
+    pub fn is_set(self) -> bool {
+        self != Self::None
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "none" | "clear" | "off" | "-" => Some(Self::None),
+            "review" | "rev" | "r" => Some(Self::Review),
+            "marked" | "mark" | "m" | "star" | "starred" => Some(Self::Marked),
+            "test" | "t" => Some(Self::Test),
+            _ => None,
+        }
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Card {
     pub id: u64,
@@ -144,9 +221,15 @@ pub struct Card {
     pub last_reviewed: Option<NaiveDate>,
     #[serde(default)]
     pub suspended: bool,
-    /// In the user's "words I have to study" pile.
+
+    /// Your own status for this word. See [`Study`].
     #[serde(default)]
-    pub marked: bool,
+    pub status: Study,
+    /// Collections written before `status` existed carried a plain `marked`
+    /// boolean. [`Db::migrate`] folds it into `status` on load and then stops
+    /// writing it.
+    #[serde(default, rename = "marked", skip_serializing_if = "is_false")]
+    legacy_marked: bool,
 }
 
 impl Card {
@@ -167,12 +250,18 @@ impl Card {
             due: today,
             last_reviewed: None,
             suspended: false,
-            marked: false,
+            status: Study::None,
+            legacy_marked: false,
         }
     }
 
     pub fn is_due(&self, today: NaiveDate) -> bool {
         !self.suspended && self.state != CardState::New && self.due <= today
+    }
+
+    /// Does this word carry any status at all?
+    pub fn is_flagged(&self) -> bool {
+        self.status.is_set()
     }
 
     pub fn examples(&self) -> impl Iterator<Item = &str> {
@@ -313,15 +402,17 @@ impl Deck {
     }
 
     pub fn counts(&self, today: NaiveDate) -> DeckCounts {
-        let mut counts = DeckCounts::default();
-        counts.total = self.cards.len();
+        let mut counts = DeckCounts {
+            total: self.cards.len(),
+            ..DeckCounts::default()
+        };
         for card in &self.cards {
             if card.suspended {
                 counts.suspended += 1;
                 continue;
             }
-            if card.marked {
-                counts.marked += 1;
+            if card.status.is_set() {
+                counts.flagged += 1;
             }
             match card.state {
                 CardState::New => counts.new += 1,
@@ -342,12 +433,49 @@ pub struct DeckCounts {
     pub learning: usize,
     pub due: usize,
     pub suspended: usize,
-    pub marked: usize,
+    /// Words carrying any status at all.
+    pub flagged: usize,
 }
 
 impl DeckCounts {
     pub fn pending(&self) -> usize {
         self.new + self.learning + self.due
+    }
+
+    pub fn status(&self) -> DeckStatus {
+        if self.total == 0 {
+            DeckStatus::Empty
+        } else if self.due + self.learning > 0 {
+            DeckStatus::ReviewNeeded
+        } else if self.new > 0 {
+            DeckStatus::NewCards
+        } else {
+            DeckStatus::UpToDate
+        }
+    }
+}
+
+/// What a deck wants from you today, at a glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeckStatus {
+    /// Cards are due or waiting to be relearned.
+    ReviewNeeded,
+    /// Nothing due, but there are unseen cards left in today's ration.
+    NewCards,
+    /// Everything for today is done.
+    UpToDate,
+    /// No cards at all.
+    Empty,
+}
+
+impl DeckStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ReviewNeeded => "review needed",
+            Self::NewCards => "new cards",
+            Self::UpToDate => "up to date",
+            Self::Empty => "empty",
+        }
     }
 }
 
@@ -358,6 +486,14 @@ pub struct ReviewLog {
     pub card_id: u64,
     /// 0..=3, matching `Grade::index`.
     pub grade: u8,
+    /// Answered in a status drill rather than at its scheduled time. Drills
+    /// pull words forward on purpose, so they say nothing about retention.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub drill: bool,
+    /// The card had never been answered before, so this was learning it, not
+    /// remembering it.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub learning: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -392,10 +528,38 @@ impl Db {
             .position(|d| d.name.eq_ignore_ascii_case(name))
     }
 
+    /// Decks are addressed by id, not by position: removing one shifts every
+    /// later index, and handles held across that removal would silently point
+    /// at the wrong deck.
+    pub fn deck_by_id(&self, id: u64) -> Option<&Deck> {
+        self.decks.iter().find(|d| d.id == id)
+    }
+
+    pub fn deck_by_id_mut(&mut self, id: u64) -> Option<&mut Deck> {
+        self.decks.iter_mut().find(|d| d.id == id)
+    }
+
+    pub fn index_of(&self, id: u64) -> Option<usize> {
+        self.decks.iter().position(|d| d.id == id)
+    }
+
     pub fn add_deck(&mut self, name: String) -> usize {
         let id = self.next_deck_id();
         self.decks.push(Deck::new(id, name));
         self.decks.len() - 1
+    }
+
+    /// Bring an older collection up to date. Currently folds the pre-`status`
+    /// `marked` boolean into [`Study::Marked`].
+    pub fn migrate(&mut self) {
+        for card in self.decks.iter_mut().flat_map(|d| d.cards.iter_mut()) {
+            if card.legacy_marked {
+                if card.status == Study::None {
+                    card.status = Study::Marked;
+                }
+                card.legacy_marked = false;
+            }
+        }
     }
 
     /// Repair id counters after loading a file that was edited by hand.

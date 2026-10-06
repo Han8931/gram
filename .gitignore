@@ -1,8 +1,10 @@
 /target
 
-# Extracted from a copyrighted book — keep it local.
-/word_smart.epub
+# Extracted from copyrighted books — keep them local.
+*.epub
 /decks/
+
+__pycache__/
 
 # Local Claude Code settings.
 /.claude/settings.local.json

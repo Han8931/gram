@@ -2,9 +2,10 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, anyhow, bail};
-use chrono::NaiveDate;
+use chrono::{Local, NaiveDate};
 
 use crate::model::{Card, Db, Deck};
 
@@ -12,10 +13,10 @@ use crate::model::{Card, Db, Deck};
 ///
 /// `$GRAM_DATA` wins, then `$XDG_DATA_HOME/gram`, then `~/.local/share/gram`.
 pub fn data_path() -> Result<PathBuf> {
-    if let Ok(path) = std::env::var("GRAM_DATA") {
-        if !path.is_empty() {
-            return Ok(PathBuf::from(path));
-        }
+    if let Ok(path) = std::env::var("GRAM_DATA")
+        && !path.is_empty()
+    {
+        return Ok(PathBuf::from(path));
     }
     let base = match std::env::var("XDG_DATA_HOME") {
         Ok(dir) if !dir.is_empty() => PathBuf::from(dir),
@@ -44,6 +45,7 @@ pub fn load_from(path: &Path) -> Result<Db> {
     let mut db: Db = serde_json::from_str(&text)
         .with_context(|| format!("parsing collection {}", path.display()))?;
     db.reseat_ids();
+    db.migrate();
     Ok(db)
 }
 
@@ -52,18 +54,41 @@ pub fn save(db: &Db) -> Result<()> {
     save_to(db, &path)
 }
 
+/// When the collection was last written, for spotting another instance
+/// writing underneath us. `None` when there is no collection yet.
+pub fn modified(path: &Path) -> Option<SystemTime> {
+    fs::metadata(path).and_then(|data| data.modified()).ok()
+}
+
 /// Write via a temp file and rename, so an interrupted save can't truncate
 /// the collection.
 pub fn save_to(db: &Db, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("creating {}", parent.display()))?;
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     let json = serde_json::to_string_pretty(db)?;
-    let tmp = path.with_extension("json.tmp");
+    // The temp file carries the writer's pid: a shared name means two gram
+    // instances saving at once can rename each other's half-written file over
+    // the collection.
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
     fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
+    if let Err(err) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err).with_context(|| format!("replacing {}", path.display()));
+    }
     Ok(())
+}
+
+/// Copy the collection aside, under a name that says what it is, and return
+/// where it went. Used when the file on disk turns out to be someone else's
+/// newer version: overwriting it is still the right call — this copy of the
+/// collection is the one being studied — but it should not be unrecoverable.
+pub fn keep_conflicting_copy(path: &Path) -> Result<PathBuf> {
+    let stamp = Local::now().format("%Y%m%d-%H%M%S");
+    let aside = path.with_extension(format!("conflict-{stamp}.json"));
+    fs::copy(path, &aside)
+        .with_context(|| format!("copying {} to {}", path.display(), aside.display()))?;
+    Ok(aside)
 }
 
 /// Columns we recognise, by header name.
@@ -144,9 +169,13 @@ pub struct ImportReport {
 
 /// Import a delimited file into `deck`. Existing terms are updated in place
 /// rather than duplicated, so re-importing a corrected file is safe.
-pub fn import_csv(deck: &mut Deck, db_next_id: &mut dyn FnMut() -> u64, path: &Path, today: NaiveDate) -> Result<ImportReport> {
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+pub fn import_csv(
+    deck: &mut Deck,
+    db_next_id: &mut dyn FnMut() -> u64,
+    path: &Path,
+    today: NaiveDate,
+) -> Result<ImportReport> {
+    let text = fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
     let first_line = text.lines().next().unwrap_or_default();
     let delimiter = delimiter_for(path, first_line);
@@ -213,7 +242,12 @@ pub fn import_csv(deck: &mut Deck, db_next_id: &mut dyn FnMut() -> u64, path: &P
             existing.notes = notes.to_string();
             report.updated += 1;
         } else {
-            let mut card = Card::new(db_next_id(), term.to_string(), definition.to_string(), today);
+            let mut card = Card::new(
+                db_next_id(),
+                term.to_string(),
+                definition.to_string(),
+                today,
+            );
             card.pron = pron.to_string();
             card.pos = pos.to_string();
             card.example = example.to_string();
@@ -235,13 +269,13 @@ pub fn import_csv(deck: &mut Deck, db_next_id: &mut dyn FnMut() -> u64, path: &P
 }
 
 pub fn export_csv(deck: &Deck, path: &Path) -> Result<usize> {
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).ok();
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent).ok();
     }
-    let mut writer = csv::Writer::from_path(path)
-        .with_context(|| format!("writing {}", path.display()))?;
+    let mut writer =
+        csv::Writer::from_path(path).with_context(|| format!("writing {}", path.display()))?;
     writer.write_record(["term", "pron", "pos", "definition", "example", "notes"])?;
     for card in &deck.cards {
         writer.write_record([
@@ -287,21 +321,122 @@ mod tests {
 
         let mut deck = Deck::new(1, "test".into());
         let mut id = 0u64;
-        let report = import_csv(&mut deck, &mut || {
-            id += 1;
-            id
-        }, &path, today())
+        let report = import_csv(
+            &mut deck,
+            &mut || {
+                id += 1;
+                id
+            },
+            &path,
+            today(),
+        )
         .unwrap();
         fs::remove_file(&path).ok();
         (deck, report)
     }
 
+    /// A deck survives import, save, reload and export unchanged — the whole
+    /// path a collection takes between sessions, in one test.
+    #[test]
+    fn a_collection_survives_the_round_trip() {
+        let dir = std::env::temp_dir().join(format!("gram-roundtrip-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let source = dir.join("in.csv");
+        fs::write(
+            &source,
+            "term,pron,pos,definition,example,notes\n\
+             abash,uh BASH,v,to embarrass,Meredith felt *abashed*.,a note\n\
+             한국어,han guk eo,n,the Korean language,\"한국어를 공부한다.\",두 줄\n",
+        )
+        .unwrap();
+
+        // Import.
+        let mut db = Db::default();
+        let index = db.add_deck("round trip".into());
+        let mut next = db.next_card_id();
+        let mut deck = std::mem::replace(&mut db.decks[index], Deck::new(0, String::new()));
+        let report = import_csv(
+            &mut deck,
+            &mut || {
+                next += 1;
+                next - 1
+            },
+            &source,
+            today(),
+        )
+        .unwrap();
+        db.decks[index] = deck;
+        db.reseat_ids();
+        assert_eq!((report.added, report.skipped), (2, 0));
+
+        // Grade one card so there is scheduling state worth preserving.
+        db.decks[index].cards[0].grade(crate::model::Grade::Good, today());
+
+        // Save, and reload into a fresh Db.
+        let collection = dir.join("collection.json");
+        save_to(&db, &collection).unwrap();
+        let reloaded = load_from(&collection).unwrap();
+
+        assert_eq!(reloaded.decks.len(), 1);
+        let after = &reloaded.decks[0];
+        assert_eq!(after.cards.len(), 2);
+        assert_eq!(after.cards[0].term, "abash");
+        assert_eq!(after.cards[0].state, crate::model::CardState::Review);
+        assert_eq!(after.cards[0].due, db.decks[index].cards[0].due);
+        assert_eq!(after.cards[1].term, "한국어", "non-ASCII makes it back");
+        assert_eq!(after.cards[1].definition, "the Korean language");
+
+        // Export, and re-import the export: same cards, nothing duplicated.
+        let out = dir.join("out.csv");
+        assert_eq!(export_csv(after, &out).unwrap(), 2);
+        let mut again = after.clone();
+        let mut id = 1000u64;
+        let report = import_csv(
+            &mut again,
+            &mut || {
+                id += 1;
+                id
+            },
+            &out,
+            today(),
+        )
+        .unwrap();
+        assert_eq!(
+            (report.added, report.updated),
+            (0, 2),
+            "an export re-imports onto the same cards"
+        );
+        assert_eq!(again.cards.len(), 2);
+        assert_eq!(
+            again.cards[0].due, after.cards[0].due,
+            "and leaves their scheduling alone"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_leaves_no_temp_file_behind() {
+        let dir = std::env::temp_dir().join(format!("gram-tmpfile-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let collection = dir.join("collection.json");
+
+        save_to(&Db::default(), &collection).unwrap();
+        let left: Vec<String> = fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["collection.json".to_string()]);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn imports_named_headers_in_any_order() {
-        let (deck, report) = import_str(
-            "definition,term,pos\nto embarrass,abash,v\n",
-            "named.csv",
-        );
+        let (deck, report) = import_str("definition,term,pos\nto embarrass,abash,v\n", "named.csv");
         assert_eq!(report.added, 1);
         assert_eq!(deck.cards[0].term, "abash");
         assert_eq!(deck.cards[0].definition, "to embarrass");
@@ -338,13 +473,19 @@ mod tests {
         assert_eq!(deck.cards.len(), 1);
         assert_eq!(report.updated, 1);
         assert_eq!(deck.cards[0].definition, "to make ashamed");
-        assert_eq!(deck.cards[0].interval, 30, "scheduling must survive reimport");
+        assert_eq!(
+            deck.cards[0].interval, 30,
+            "scheduling must survive reimport"
+        );
         fs::remove_file(&path).ok();
     }
 
     #[test]
     fn skips_rows_without_a_definition() {
-        let (deck, report) = import_str("term,definition\nabash,\n,to subside\nabate,to subside\n", "gap.csv");
+        let (deck, report) = import_str(
+            "term,definition\nabash,\n,to subside\nabate,to subside\n",
+            "gap.csv",
+        );
         assert_eq!(report.added, 1);
         assert_eq!(report.skipped, 2);
         assert_eq!(deck.cards.len(), 1);

@@ -96,11 +96,17 @@ Everything is modal and Vim-shaped.
 | `m` `Ctrl-m` | cycle this word's status |
 | `z` | hide / show every meaning in the browser |
 | `M` | drill the words carrying a status |
-| `u` | undo the last answer (or the last delete) |
+| `u` `Ctrl-r` | undo / redo a change — or undo the last answer, while reviewing |
 | `a` `o` `i` `dd` `x` | add / edit / delete / suspend a card |
 | `/text` `n` `N` `:noh` | search |
 | `:w` `:q` `:wq` `:qa` `ZZ` | write and quit |
 | `:q!` `:qa!` `ZQ` | quit without saving |
+
+`q` and `Esc` go back one screen, and the deck list is the last one: pressing
+either there writes your changes and exits, the same as `ZZ`. Worth knowing
+before you lean on `u`, which only lasts as long as the program does — a
+delete you walk out of the deck list on is a delete you have saved. `:q!`
+leaves the collection alone, asking first if there is anything to lose.
 
 Inside the card editor, `i a I A` enter insert mode, `Esc` leaves it, `h l 0 $ w b`
 move the cursor, `x D C dd` delete, and `ZZ` saves. `Example` and `Notes` hold
@@ -273,6 +279,35 @@ old number.
 To take a word out of the rotation without disturbing its schedule, suspend it
 with `x` instead — a suspended card is skipped everywhere and comes back with
 its interval intact.
+
+## Undo
+
+`u` takes back the last change you made to the collection, Vim-style, and
+`Ctrl-r` puts it back:
+
+```
+u          undo the last change            3u          undo three changes
+Ctrl-r     redo it                         3Ctrl-r     redo three
+```
+
+Not just deletes. Edits, statuses, suspends, `:forget`, a deleted deck, a
+rename, an import, `:set` — every change goes on one history, 64 deep. Each
+step says what it was (`undid deleting Abash`) and takes you back to the screen
+and the row where it happened, so undoing a delete you made ten words ago puts
+you in front of the word again. Making a change after an undo closes off the
+redo, as in Vim.
+
+While reviewing, `u` keeps the finer meaning it always had — take back my last
+answer, with the card's schedule and its place in the queue — because the
+session queue is not part of the collection and a snapshot could not restore
+it. Everything else is on the change history.
+
+The history lives in the running program and is not written to your collection,
+so quitting ends it: **a change you have saved and quit on is not undoable by
+`u`.** What covers you there is a conflict copy and `:restore`, below — and
+those are only written when gram spots a competing version on disk, not on
+every save. If you have deleted something, saved, and quit, your own backups
+of `collection.json` are the only way back.
 
 ## Data
 

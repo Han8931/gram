@@ -1570,7 +1570,7 @@ BROWSING
   /text          filter cards              n / N       next / previous match
   :noh           clear filter and marks    i / Enter   edit the card
   a / o          add a card                dd          delete card
-  u              undo a delete             x           suspend / unsuspend
+  u / Ctrl-r     undo / redo a change      x           suspend / unsuspend
   m              cycle the STATUS column   :marked     show only flagged
   z              hide / show meanings      space       check the one word
 
@@ -1606,6 +1606,27 @@ REVIEWING
 
   The bar counts cards seen off, not answers given: a card you answer Again
   shows up as `retrying` until you get it right.
+
+UNDO
+  u              undo the last change      Ctrl-r      redo it
+  3u             undo three changes        3Ctrl-r     redo three
+
+  u takes back whatever you last did to the collection, not just a delete:
+  edits, statuses, suspends, a reset deck, a deleted deck, a rename, an
+  import, a setting. Press it again to keep walking back, up to 64 changes.
+  Each one says what it was — `undid deleting Abash` — and takes you back to
+  the screen and the row it happened on.
+
+  Ctrl-r walks forward again. Making a change after undoing closes off the
+  redo, as in Vim: what you undid stops being reachable once you have done
+  something else instead.
+
+  The history is this session's only. It is not written to your collection, so
+  quitting ends it — a change you have saved and quit on is not undoable, and
+  what protects you there is `:restore`.
+
+  While reviewing, u means the finer thing it always did: take back my last
+  answer, queue and all. The change history covers everything else.
 
 WORD STATUS
   Every word carries a status of your own, shown in the browser's STATUS

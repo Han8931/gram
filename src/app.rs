@@ -223,10 +223,24 @@ struct LastAnswer {
     was_retrying: bool,
 }
 
-struct Deleted {
+/// How far back `u` can go. Each step holds the collection as it was, so this
+/// is a memory budget as much as a feature: a few tens of megabytes for a
+/// collection of a couple of thousand cards.
+const UNDO_DEPTH: usize = 64;
+
+/// The collection as it stood before one change, with the cursor that was on
+/// screen at the time. Undo is snapshot-based rather than a list of inverse
+/// operations: every change is undoable the day it is written, and no edit can
+/// quietly grow a hole in the history by forgetting to describe its opposite.
+struct Step {
+    db: Db,
+    /// What the change did, as `u` and `Ctrl-r` report it: "deleting Abash".
+    label: String,
+    /// Where it happened, so undo takes you back to it instead of leaving you
+    /// wherever you had wandered since.
+    screen: Screen,
     deck: u64,
-    index: usize,
-    card: Card,
+    row: usize,
 }
 
 /// A Tab completion in progress on the command line.
@@ -306,7 +320,14 @@ pub struct App {
     pub card_scroll: u16,
 
     last_answer: Option<LastAnswer>,
-    deleted: Vec<Deleted>,
+    /// Changes already made, newest last; `u` walks back along it. Answering a
+    /// card is not on here — a review session has its own, finer undo, which
+    /// knows about the queue as well as the card.
+    undo: Vec<Step>,
+    /// Changes `u` has taken back, newest last; `Ctrl-r` walks forward again.
+    /// Cleared by the next change, as in Vim: the future stops being the
+    /// future once you have done something else instead.
+    redo: Vec<Step>,
 
     pub dirty: bool,
     pub quit: bool,
@@ -343,7 +364,8 @@ impl App {
             help_from: Screen::Decks,
             card_scroll: 0,
             last_answer: None,
-            deleted: Vec::new(),
+            undo: Vec::new(),
+            redo: Vec::new(),
             dirty: false,
             quit: false,
             rng: Rng::from_entropy(),
@@ -794,10 +816,18 @@ impl App {
         let target = editor.target;
         let today = self.today;
 
+        // Past the validation above, so a card the editor refuses to save
+        // leaves nothing behind for `u`.
+        self.checkpoint(match target {
+            EditTarget::New { .. } => format!("adding {}", values[0]),
+            EditTarget::Existing { .. } => format!("editing {}", values[0]),
+        });
+
         match target {
             EditTarget::New { .. } => {
                 let id = self.db.next_card_id();
                 let Some(deck) = self.db.deck_by_id_mut(deck_id) else {
+                    self.undo.pop();
                     self.error("deck vanished");
                     return false;
                 };
@@ -815,6 +845,7 @@ impl App {
                     .deck_by_id_mut(deck_id)
                     .and_then(|d| d.card_mut(card))
                 else {
+                    self.undo.pop();
                     self.error("card vanished");
                     return false;
                 };
@@ -854,35 +885,118 @@ impl App {
             self.error("no card selected");
             return;
         }
-        let card = deck.cards.remove(card_index);
-        let term = card.term.clone();
-        self.deleted.push(Deleted {
-            deck: deck_id,
-            index: card_index,
-            card,
-        });
+        let term = deck.cards[card_index].term.clone();
+        self.checkpoint(format!("deleting {term}"));
+        if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
+            deck.cards.remove(card_index);
+        }
         self.dirty = true;
         self.refresh_rows();
         self.info(format!("deleted {term} — u to undo"));
     }
 
-    fn undo_delete(&mut self) {
-        let Some(entry) = self.deleted.pop() else {
-            self.error("nothing to undo");
+    // -- undo --------------------------------------------------------------
+
+    /// Record the collection as it stands, ahead of the change `label`
+    /// describes. Every path that sets `dirty` calls this first, and calls it
+    /// after its own validation, so a refused change leaves no empty step for
+    /// `u` to walk through.
+    fn checkpoint(&mut self, label: impl Into<String>) {
+        // A new change makes the redo stack unreachable, as in Vim.
+        self.redo.clear();
+        if self.undo.len() == UNDO_DEPTH {
+            self.undo.remove(0);
+        }
+        self.undo.push(self.step(label.into()));
+    }
+
+    /// The here and now, ready to be pushed onto either stack.
+    fn step(&self, label: String) -> Step {
+        Step {
+            db: self.db.clone(),
+            label,
+            screen: self.screen,
+            deck: self.browse_deck,
+            row: self.browse_sel,
+        }
+    }
+
+    /// `u` — take back the last `count` changes.
+    fn undo(&mut self, count: usize) {
+        self.walk(count, true);
+    }
+
+    /// `Ctrl-r` — put back the last `count` changes that `u` took away.
+    fn redo(&mut self, count: usize) {
+        self.walk(count, false);
+    }
+
+    fn walk(&mut self, count: usize, back: bool) {
+        let mut last = None;
+        let mut moved = 0;
+        for _ in 0..count.max(1) {
+            let from = if back { &mut self.undo } else { &mut self.redo };
+            let Some(step) = from.pop() else { break };
+            let here = self.step(step.label.clone());
+            if back {
+                self.redo.push(here);
+            } else {
+                self.undo.push(here);
+            }
+            last = Some(step.label.clone());
+            self.restore_step(step);
+            moved += 1;
+        }
+
+        let Some(label) = last else {
+            // Vim's own wording, because this is Vim's own situation.
+            self.error(if back {
+                "already at oldest change"
+            } else {
+                "already at newest change"
+            });
             return;
         };
-        let term = entry.card.term.clone();
-        let Some(deck) = self.db.deck_by_id_mut(entry.deck) else {
-            // The deck itself was deleted after the card was; there is nowhere
-            // to put it back. Say so rather than reporting a phantom success.
-            self.error(format!("cannot restore {term} — its deck is gone"));
-            return;
-        };
-        let at = entry.index.min(deck.cards.len());
-        deck.cards.insert(at, entry.card);
+
         self.dirty = true;
+        let verb = if back { "undid" } else { "redid" };
+        if moved > 1 {
+            self.info(format!("{verb} {moved} changes, back to {label}"));
+        } else {
+            self.info(format!("{verb} {label}"));
+        }
+    }
+
+    /// Put a recorded state back on screen, cursor included.
+    fn restore_step(&mut self, step: Step) {
+        self.db = step.db;
+        self.browse_deck = step.deck;
+        self.browse_sel = step.row;
+
+        // The deck the step was taken in may not exist in the state being
+        // restored — undoing `:deck foo` is exactly that case — and a browser
+        // pointed at a deck that is not there shows "no deck" and traps you.
+        let deck_gone = self.db.deck_by_id(self.browse_deck).is_none();
+        self.screen = match step.screen {
+            Screen::Browse if deck_gone => Screen::Decks,
+            // A session's queue holds card ids that a restored collection need
+            // not contain, so undo never drops you back into one.
+            Screen::Review => Screen::Decks,
+            screen => screen,
+        };
+        if self.screen != Screen::Review {
+            self.session = None;
+            self.last_answer = None;
+        }
+        self.peek = false;
         self.refresh_rows();
-        self.info(format!("restored {term}"));
+        self.clamp_decks_sel();
+    }
+
+    fn clamp_decks_sel(&mut self) {
+        if self.decks_sel >= self.db.decks.len() {
+            self.decks_sel = self.db.decks.len().saturating_sub(1);
+        }
     }
 
     /// The card the current screen is pointing at, as `(deck id, card id)`.
@@ -907,6 +1021,15 @@ impl App {
             self.error("no card selected");
             return;
         };
+        let Some(term) = self
+            .db
+            .deck_by_id(deck_id)
+            .and_then(|d| d.card(card_id))
+            .map(|c| c.term.clone())
+        else {
+            return;
+        };
+        self.checkpoint(format!("the status of {term}"));
         let Some(card) = self
             .db
             .deck_by_id_mut(deck_id)
@@ -934,6 +1057,15 @@ impl App {
             self.error("no card selected");
             return;
         };
+        let Some(term) = self
+            .db
+            .deck_by_id(deck_id)
+            .and_then(|d| d.card(card_id))
+            .map(|c| c.term.clone())
+        else {
+            return;
+        };
+        self.checkpoint(format!("the status of {term}"));
         let Some(card) = self
             .db
             .deck_by_id_mut(deck_id)
@@ -955,6 +1087,18 @@ impl App {
         let Some((deck_id, card_index)) = self.selected_card() else {
             return;
         };
+        let Some(card) = self
+            .db
+            .deck_by_id(deck_id)
+            .and_then(|d| d.cards.get(card_index))
+        else {
+            return;
+        };
+        self.checkpoint(if card.suspended {
+            format!("unsuspending {}", card.term)
+        } else {
+            format!("suspending {}", card.term)
+        });
         let Some(card) = self
             .db
             .deck_by_id_mut(deck_id)
@@ -1144,6 +1288,7 @@ impl App {
         match confirm.action {
             ConfirmAction::DeleteDeck(deck_id) => {
                 if let Some(index) = self.db.index_of(deck_id) {
+                    self.checkpoint(format!("deleting deck {}", self.db.decks[index].name));
                     let deck = self.db.decks.remove(index);
                     self.decks_sel = self.decks_sel.min(self.db.decks.len().saturating_sub(1));
                     // Anything still pointing at this deck now points nowhere.
@@ -1157,7 +1302,6 @@ impl App {
                         }
                     }
                     self.last_answer = None;
-                    self.deleted.retain(|d| d.deck != deck_id);
                     self.dirty = true;
                     self.refresh_rows();
                     self.info(format!("deleted deck {}", deck.name));
@@ -1165,6 +1309,9 @@ impl App {
             }
             ConfirmAction::ForgetDeck(deck_id) => {
                 let today = self.today;
+                if let Some(name) = self.db.deck_by_id(deck_id).map(|d| d.name.clone()) {
+                    self.checkpoint(format!("resetting {name}"));
+                }
                 if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
                     for card in &mut deck.cards {
                         card.forget(today);
@@ -1287,7 +1434,8 @@ impl App {
         self.session = None;
         self.editor = None;
         self.last_answer = None;
-        self.deleted.clear();
+        self.undo.clear();
+        self.redo.clear();
         self.browse_deck = 0;
         self.browse_sel = 0;
         self.filter.clear();
@@ -1684,7 +1832,11 @@ impl App {
             KeyCode::Char(' ') if self.screen == Screen::Browse => self.toggle_peek(),
             KeyCode::Char('S') => self.open_stats(),
             KeyCode::Char('a') | KeyCode::Char('o') => self.open_new_card(),
-            KeyCode::Char('u') => self.undo_delete(),
+            // `u` and Ctrl-r walk the change history, as in Vim. Inside a
+            // review session `u` means something finer — undo my last answer —
+            // and `key_review` has already had its refusal above.
+            KeyCode::Char('u') => self.undo(count.max(1) as usize),
+            KeyCode::Char('r') if ctrl => self.redo(count.max(1) as usize),
             KeyCode::Char('x') if self.screen == Screen::Browse => self.toggle_suspend(),
 
             KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right => match self.screen {
@@ -1940,6 +2092,7 @@ impl App {
                     self.error(format!("deck {rest:?} already exists"));
                     return;
                 }
+                self.checkpoint(format!("creating deck {rest}"));
                 let index = self.db.add_deck(rest.to_string());
                 self.decks_sel = index;
                 self.dirty = true;
@@ -1954,6 +2107,11 @@ impl App {
                     self.error("usage: :rename <name>");
                     return;
                 }
+                let was = self
+                    .db
+                    .deck_by_id(deck_id)
+                    .map_or_else(String::new, |d| d.name.clone());
+                self.checkpoint(format!("renaming {was}"));
                 if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
                     deck.name = rest.to_string();
                 }
@@ -2081,6 +2239,7 @@ impl App {
                     self.error(format!("grading must be binary or sm2, not {value:?}"));
                     return;
                 };
+                self.checkpoint("the grading mode");
                 self.db.grading = grading;
                 self.dirty = true;
                 self.info(match grading {
@@ -2098,6 +2257,7 @@ impl App {
                     self.error("no deck selected");
                     return;
                 };
+                self.checkpoint("the new-card limit");
                 if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
                     deck.new_per_day = amount;
                 }
@@ -2164,6 +2324,9 @@ impl App {
 
         match result {
             Ok(report) => {
+                // Only once the whole file has parsed: a failed import changes
+                // nothing, so it has nothing for `u` to take back.
+                self.checkpoint(format!("importing into {deck_name}"));
                 let index = match target {
                     Some(index) => {
                         self.db.decks[index] = staged;
@@ -3546,48 +3709,133 @@ mod tests {
         assert!(app.db.decks.is_empty());
         assert!(app.session.is_none(), "the session cannot outlive its deck");
         assert_eq!(app.browse_deck, 0);
-        assert!(
-            app.deleted.is_empty(),
-            "undo entries for a dead deck are dropped"
-        );
+
+        // The deck is gone, but not beyond recall: `u` is the last word on
+        // every change, a deleted deck included.
+        app.on_key(key('u')).unwrap();
+        assert_eq!(app.db.decks.len(), 1, "u brings the deck back");
+        assert_eq!(app.db.decks[0].cards.len(), 3, "as it was when it went");
     }
 
     #[test]
-    fn undo_delete_says_so_when_the_deck_is_gone() {
+    fn u_walks_back_through_every_kind_of_change() {
         let mut app = app_with_cards(3);
-        let second = app.db.add_deck("second".into());
-        let deck_id = app.db.decks[second].id;
-        let card_id = app.db.next_card_id();
-        let today = app.today;
-        app.db.decks[second].cards.push(Card::new(
-            card_id,
-            "zeal".into(),
-            "eagerness".into(),
-            today,
-        ));
+        app.enter_browse(DECK);
 
-        app.enter_browse(deck_id);
-        app.browse_sel = 0;
-        app.on_key(key('d')).unwrap();
-        app.on_key(key('d')).unwrap();
-        assert_eq!(app.deleted.len(), 1);
+        app.on_key(key('x')).unwrap(); // suspend a card
+        app.on_key(key('m')).unwrap(); // give it a status
+        app.run_command("deck second"); // and make a deck
+        assert_eq!(app.db.decks.len(), 2);
 
-        // Remove the *other* deck. The surviving deck shifts down a slot, which
-        // used to make the undo entry point at the wrong one.
-        app.screen = Screen::Decks;
-        app.decks_sel = 0;
-        app.on_key(key('d')).unwrap();
-        app.on_key(key('d')).unwrap();
-        app.on_key(key('y')).unwrap();
-        assert_eq!(app.db.decks.len(), 1);
-        assert_eq!(app.db.decks[0].name, "second");
-
-        // The card belongs to the surviving deck, so undo still works and puts
-        // it back in the right place.
         app.on_key(key('u')).unwrap();
+        assert_eq!(app.db.decks.len(), 1, "the deck goes");
+        app.on_key(key('u')).unwrap();
+        assert_eq!(
+            app.db.decks[0].cards[0].status,
+            Study::None,
+            "then the status"
+        );
+        app.on_key(key('u')).unwrap();
+        assert!(!app.db.decks[0].cards[0].suspended, "then the suspend");
+
+        app.on_key(key('u')).unwrap();
+        assert!(app.status.error, "and then there is nothing left to undo");
+        assert_eq!(app.status.text, "already at oldest change");
+    }
+
+    #[test]
+    fn ctrl_r_puts_back_what_u_took() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        app.on_key(key('d')).unwrap();
+        app.on_key(key('d')).unwrap();
+        assert_eq!(app.db.decks[0].cards.len(), 2);
+
+        app.on_key(key('u')).unwrap();
+        assert_eq!(app.db.decks[0].cards.len(), 3, "u restores the card");
+
+        let redo = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        app.on_key(redo).unwrap();
+        assert_eq!(app.db.decks[0].cards.len(), 2, "Ctrl-r deletes it again");
+
+        app.on_key(redo).unwrap();
+        assert!(app.status.error);
+        assert_eq!(app.status.text, "already at newest change");
+    }
+
+    #[test]
+    fn a_change_after_an_undo_closes_off_the_redo() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        app.on_key(key('d')).unwrap();
+        app.on_key(key('d')).unwrap();
+        app.on_key(key('u')).unwrap();
+
+        // Vim's rule: doing something else makes the undone change unreachable.
+        app.on_key(key('x')).unwrap();
+        let redo = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        app.on_key(redo).unwrap();
+        assert_eq!(
+            app.db.decks[0].cards.len(),
+            3,
+            "the delete does not come back"
+        );
+        assert_eq!(app.status.text, "already at newest change");
+    }
+
+    #[test]
+    fn a_count_undoes_that_many_changes() {
+        let mut app = app_with_cards(4);
+        app.enter_browse(DECK);
+        for _ in 0..3 {
+            app.on_key(key('d')).unwrap();
+            app.on_key(key('d')).unwrap();
+        }
         assert_eq!(app.db.decks[0].cards.len(), 1);
-        assert_eq!(app.db.decks[0].cards[0].term, "zeal");
-        assert!(!app.status.error, "{}", app.status.text);
+
+        app.on_key(key('3')).unwrap();
+        app.on_key(key('u')).unwrap();
+        assert_eq!(
+            app.db.decks[0].cards.len(),
+            4,
+            "3u takes back three deletes"
+        );
+        assert!(app.status.text.contains("3 changes"), "{}", app.status.text);
+    }
+
+    #[test]
+    fn a_refused_change_leaves_nothing_to_undo() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+
+        app.run_command("deck "); // no name — refused
+        app.run_command("set grading=sideways"); // not a mode — refused
+        app.on_key(key('u')).unwrap();
+        assert_eq!(app.status.text, "already at oldest change");
+    }
+
+    #[test]
+    fn undo_goes_back_to_where_the_change_happened() {
+        let mut app = app_with_cards(5);
+        app.enter_browse(DECK);
+        app.browse_sel = 3;
+        app.on_key(key('d')).unwrap();
+        app.on_key(key('d')).unwrap();
+
+        app.screen = Screen::Decks;
+        app.on_key(key('u')).unwrap();
+        assert_eq!(app.screen, Screen::Browse, "back to the browser");
+        assert_eq!(app.browse_sel, 3, "and to the row it happened on");
+    }
+
+    #[test]
+    fn the_undo_history_is_bounded() {
+        let mut app = app_with_cards(1);
+        app.enter_browse(DECK);
+        for _ in 0..UNDO_DEPTH + 10 {
+            app.on_key(key('x')).unwrap();
+        }
+        assert_eq!(app.undo.len(), UNDO_DEPTH, "the oldest steps fall off");
     }
 
     #[test]

@@ -523,14 +523,18 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
     const STATUS_WIDTH: usize = 9;
     let width = inner.width as usize;
     let term_width = 22.min(width / 4).max(6);
-    let definition_width = width.saturating_sub(term_width + FIXED);
+    // Wide enough for the last row's number, so the column never shifts as you
+    // scroll; two digits minimum, or a one-card deck looks ragged.
+    let number_width = app.rows.len().to_string().len().max(2);
+    let definition_width = width.saturating_sub(term_width + FIXED + number_width + 1);
     let today = app.today;
 
     let items: Vec<ListItem> = app
         .rows
         .iter()
         .filter_map(|i| deck.cards.get(*i))
-        .map(|card| {
+        .enumerate()
+        .map(|(row, card)| {
             let (state_text, state_color) = match card.state {
                 _ if card.suspended => ("susp", DIM),
                 CardState::New => ("new", NEW),
@@ -562,6 +566,12 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
             };
 
             ListItem::new(Line::from(vec![
+                // Where the word sits in the list you are looking at — "word
+                // 412 of 832" is how you keep your place in a deck.
+                Span::styled(
+                    format!("{:>number_width$} ", row + 1),
+                    Style::default().fg(DIM),
+                ),
                 Span::styled(pad(&card.term, term_width), term_style),
                 Span::styled(
                     format!(" {}", pad(&card.pos, 4)),
@@ -587,7 +597,11 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_widget(
         table_header(Line::from(vec![
             Span::styled(
-                format!(" {:<width$}", "TERM", width = term_width),
+                format!(" {:>number_width$} ", "#"),
+                Style::default().fg(DIM).bold(),
+            ),
+            Span::styled(
+                format!("{:<width$}", "TERM", width = term_width),
                 Style::default().fg(DIM).bold(),
             ),
             Span::styled(format!(" {:<4}", "POS"), Style::default().fg(DIM).bold()),

@@ -1,5 +1,7 @@
 # gram
 
+[![ci](https://github.com/Han8931/gram/actions/workflows/ci.yml/badge.svg)](https://github.com/Han8931/gram/actions/workflows/ci.yml)
+
 A Vim-flavoured spaced-repetition vocabulary trainer for the terminal, built
 around the Word Smart word list.
 
@@ -386,11 +388,21 @@ and `*.epub` are both git-ignored for the same reason.
 
 ```sh
 cargo test                                   # 138 unit tests
+python3 tools/check_layout.py                # render at three sizes, check widths
 python3 tools/drive_tui.py "s 3" 100 24      # render the TUI headlessly
 ```
+
+CI runs `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, a CLI
+smoke test and `tools/check_layout.py` on every push and pull request.
 
 `tools/drive_tui.py` runs gram in a pty, feeds it keystrokes and prints the
 resulting screen, which makes the layout testable without a terminal. It uses
 `target/release/gram` if that exists and `target/debug/gram` otherwise;
 `$GRAM_BIN` overrides. Point `$GRAM_DATA` at a scratch file so a test run
 never touches your real collection.
+
+`tools/check_layout.py` drives it: it builds its own scratch collection with a
+Korean deck, renders six screens at 60x20, 80x24 and 100x30, and fails if any
+row overflows the screen width or an expected string is missing. 한 is two
+columns wide, so code that counts characters where it should count columns
+pushes a border past the edge — which no unit test notices.

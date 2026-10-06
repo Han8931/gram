@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Edition 2024 and let-chains, so stable has to be recent. This action
+      # is the one that installs rustfmt and clippy alongside it.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      # Only gram's own warnings are errors. A blanket RUSTFLAGS would fail
+      # the build on a warning inside a dependency, which is not ours to fix.
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test
+
+      - name: Build
+        run: cargo build --release
+
+      # The tests cover the collection file and the layout helpers, not the
+      # three subcommands — which is where a broken build shows up first.
+      - name: Smoke-test the CLI
+        run: |
+          set -euxo pipefail
+          gram="$PWD/target/release/gram"
+          work="$(mktemp -d)"
+          cd "$work"
+          export GRAM_DATA="$work/collection.json"
+
+          # The resolved path, before there is anything at it.
+          test "$($gram path)" = "$GRAM_DATA"
+
+          # Korean terms and an embedded comma, to catch a CSV or a width bug
+          # that an ASCII-only fixture would sail straight past.
+          printf 'term,definition\n' > words.csv
+          printf 'abash,"to embarrass, or to make ashamed"\n' >> words.csv
+          printf '한국어,the Korean language\n' >> words.csv
+
+          $gram import words.csv Smoke | grep -q '2 added'
+          $gram decks | grep -q Smoke
+          grep -q '한국어' "$GRAM_DATA"
+
+          # Re-importing updates in place rather than duplicating.
+          $gram import words.csv Smoke | grep -q '0 added, 2 updated'
+
+      # A width bug does not fail a unit test — it pushes a border off the
+      # edge of a real terminal. This renders gram in a pty at three sizes
+      # with a Korean deck, where counting characters instead of columns
+      # shows up immediately.
+      - name: Check the layout in a terminal
+        run: python3 tools/check_layout.py

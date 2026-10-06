@@ -113,14 +113,31 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
 /// What Tab is offering, with the candidate currently showing picked out.
 fn render_wildmenu(frame: &mut Frame, completion: &Completion, area: Rect) {
+    let labels: Vec<String> = completion
+        .candidates
+        .iter()
+        .map(|candidate| format!(" {} ", menu_label(candidate)))
+        .collect();
+    let widths: Vec<usize> = labels.iter().map(|label| util::width(label)).collect();
+    // Tab can walk past the right edge of the strip. Scroll with it, or the
+    // candidate you just picked is the one you cannot see.
+    let shown = wildmenu_window(&widths, completion.index.unwrap_or(0), area.width as usize);
+
     let mut spans = Vec::new();
-    for (index, candidate) in completion.candidates.iter().enumerate() {
+    let marker = Style::default().fg(ACCENT);
+    if shown.start > 0 {
+        spans.push(Span::styled("‹", marker));
+    }
+    for index in shown.clone() {
         let style = if completion.index == Some(index) {
             Style::default().fg(Color::Black).bg(ACCENT).bold()
         } else {
             Style::default().fg(TEXT)
         };
-        spans.push(Span::styled(format!(" {} ", menu_label(candidate)), style));
+        spans.push(Span::styled(labels[index].clone(), style));
+    }
+    if shown.end < labels.len() {
+        spans.push(Span::styled("›", marker));
     }
 
     frame.render_widget(Clear, area);
@@ -128,6 +145,31 @@ fn render_wildmenu(frame: &mut Frame, completion: &Completion, area: Rect) {
         Paragraph::new(Line::from(spans)).style(Style::default().bg(HEAD_BG)),
         area,
     );
+}
+
+/// Which candidates the strip has room for, with `selected` always among them.
+/// Two columns are held back for the `‹ ›` markers whenever the list is wider
+/// than the strip, so the window does not jitter by a column as it scrolls.
+fn wildmenu_window(widths: &[usize], selected: usize, width: usize) -> std::ops::Range<usize> {
+    if widths.iter().sum::<usize>() <= width {
+        return 0..widths.len();
+    }
+    let budget = width.saturating_sub(2);
+    let mut start = 0;
+    loop {
+        let mut end = start;
+        let mut used = 0;
+        while end < widths.len() && used + widths[end] <= budget {
+            used += widths[end];
+            end += 1;
+        }
+        // A candidate too wide for the whole strip still gets shown, clipped,
+        // rather than scrolling for ever in search of a fit.
+        if end > selected || start >= selected {
+            return start..end.max(start + 1).min(widths.len());
+        }
+        start += 1;
+    }
 }
 
 /// Paths are listed by their last segment: the directory part is already on
@@ -1716,6 +1758,26 @@ mod tests {
     #[test]
     fn window_handles_zero_width() {
         assert_eq!(window("abash", 3, 0), (String::new(), 0));
+    }
+
+    #[test]
+    fn the_wildmenu_shows_every_candidate_that_fits() {
+        assert_eq!(wildmenu_window(&[5, 5, 5], 0, 20), 0..3);
+    }
+
+    #[test]
+    fn the_wildmenu_scrolls_to_keep_the_picked_candidate_in_view() {
+        let widths = [5; 10];
+        // 12 columns, less two for the markers, holds two candidates.
+        assert_eq!(wildmenu_window(&widths, 0, 12), 0..2);
+        assert_eq!(wildmenu_window(&widths, 1, 12), 0..2);
+        assert_eq!(wildmenu_window(&widths, 2, 12), 1..3);
+        assert_eq!(wildmenu_window(&widths, 9, 12), 8..10);
+    }
+
+    #[test]
+    fn the_wildmenu_still_shows_a_candidate_wider_than_the_strip() {
+        assert_eq!(wildmenu_window(&[4, 40, 4], 1, 10), 1..2);
     }
 
     #[test]

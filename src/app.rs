@@ -277,6 +277,11 @@ pub struct App {
     pub filter: String,
     /// `:marked` — restrict the browser to words carrying a status.
     pub status_filter: StatusFilter,
+    /// `z` — cover every meaning in the browser, so the word list reads as a
+    /// test rather than as an answer sheet.
+    pub hide_meanings: bool,
+    /// `space` — uncover the word under the cursor, until the cursor moves.
+    pub peek: bool,
 
     pub editor: Option<Editor>,
     pub session: Option<Session>,
@@ -324,6 +329,8 @@ impl App {
             rows: Vec::new(),
             filter: String::new(),
             status_filter: StatusFilter::default(),
+            hide_meanings: false,
+            peek: false,
             editor: None,
             session: None,
             confirm: None,
@@ -987,6 +994,7 @@ impl App {
         if len == 0 {
             return;
         }
+        self.peek = false;
         let cursor = self.cursor();
         let next = (*cursor as isize + delta).clamp(0, len as isize - 1);
         *cursor = next as usize;
@@ -997,6 +1005,7 @@ impl App {
         if len == 0 {
             return;
         }
+        self.peek = false;
         *self.cursor() = index.min(len - 1);
     }
 
@@ -1005,12 +1014,40 @@ impl App {
         if self.filter.is_empty() || self.rows.is_empty() {
             return;
         }
+        self.peek = false;
         let len = self.rows.len();
         self.browse_sel = if forward {
             (self.browse_sel + 1) % len
         } else {
             (self.browse_sel + len - 1) % len
         };
+    }
+
+    /// `z` — cover the meanings, or uncover them if they are already covered.
+    /// The whole list at once: it is the list you are testing yourself against.
+    fn toggle_hide_meanings(&mut self) {
+        self.hide_meanings = !self.hide_meanings;
+        self.peek = false;
+        if self.hide_meanings {
+            self.info("meanings hidden — space to check one, z to show them all");
+        } else {
+            self.info("meanings shown");
+        }
+    }
+
+    /// `space` — uncover just the word under the cursor, so checking one
+    /// answer does not mean giving away the rest of the list.
+    fn toggle_peek(&mut self) {
+        if !self.hide_meanings {
+            return;
+        }
+        self.peek = !self.peek;
+    }
+
+    /// Whether the selected card's meaning is on screen: covered by `z`, minus
+    /// the one word `space` has uncovered.
+    pub fn meaning_hidden(&self, row: usize) -> bool {
+        self.hide_meanings && !(self.peek && row == self.browse_sel)
     }
 
     fn enter_browse(&mut self, deck_id: u64) {
@@ -1643,6 +1680,8 @@ impl App {
                 }
             }
             KeyCode::Char('m') if self.screen == Screen::Browse => self.cycle_status(!ctrl),
+            KeyCode::Char('z') if self.screen == Screen::Browse => self.toggle_hide_meanings(),
+            KeyCode::Char(' ') if self.screen == Screen::Browse => self.toggle_peek(),
             KeyCode::Char('S') => self.open_stats(),
             KeyCode::Char('a') | KeyCode::Char('o') => self.open_new_card(),
             KeyCode::Char('u') => self.undo_delete(),
@@ -3019,6 +3058,54 @@ mod tests {
             app.on_key(key('m')).unwrap();
             assert_eq!(status(&app), expected, "m steps forward through the cycle");
         }
+    }
+
+    #[test]
+    fn z_hides_every_meaning_and_shows_them_again() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+
+        app.on_key(key('z')).unwrap();
+        assert!(app.hide_meanings, "z hides");
+        assert!((0..3).all(|row| app.meaning_hidden(row)), "the whole list");
+
+        app.on_key(key('z')).unwrap();
+        assert!(!app.hide_meanings, "z again shows");
+        assert!((0..3).all(|row| !app.meaning_hidden(row)));
+    }
+
+    #[test]
+    fn space_uncovers_only_the_selected_word() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        app.on_key(key('z')).unwrap();
+        app.on_key(key(' ')).unwrap();
+
+        assert!(!app.meaning_hidden(0), "the one under the cursor");
+        assert!(app.meaning_hidden(1), "and no other");
+        assert!(app.hide_meanings, "space does not leave the mode");
+    }
+
+    #[test]
+    fn moving_on_covers_the_word_space_uncovered() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        app.on_key(key('z')).unwrap();
+        app.on_key(key(' ')).unwrap();
+        app.on_key(key('j')).unwrap();
+
+        assert!(app.meaning_hidden(1), "the next word starts covered");
+        assert!(app.meaning_hidden(0), "and the last one is covered again");
+    }
+
+    #[test]
+    fn space_does_nothing_while_the_meanings_are_showing() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        app.on_key(key(' ')).unwrap();
+
+        assert!(!app.peek, "nothing to uncover");
+        assert!(!app.hide_meanings);
     }
 
     #[test]

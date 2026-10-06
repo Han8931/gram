@@ -34,6 +34,7 @@ SCREENS = [
     ("s", [DECK]),  # a review card, question side
     ("s ", [DECK, "the Korean language"]),  # revealed
     ("\\n", [DECK, "STATE"]),  # the browser
+    ("\\nz", [DECK, "hidden", "·"]),  # the browser with its meanings covered
     ("?", ["MOVING AROUND"]),  # help
     (":restore\\n", ["no kept copies"]),  # a status-line message
 ]

@@ -94,6 +94,7 @@ Everything is modal and Vim-shaped.
 | `y` / `n` | I know this / I don't know |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `m` `Ctrl-m` | cycle this word's status |
+| `z` | hide / show every meaning in the browser |
 | `M` | drill the words carrying a status |
 | `u` | undo the last answer (or the last delete) |
 | `a` `o` `i` `dd` `x` | add / edit / delete / suspend a card |
@@ -179,6 +180,32 @@ pane below the list, so the pane gets the whole width for prose and the list
 keeps its columns. Terminals under 22 rows skip it and give everything to the
 list. A `…` in the pane's border means the word has more text than fits;
 `Enter` opens it in the editor.
+
+### Practising from the list
+
+A browser that shows every definition is an answer sheet, which is no use for
+testing yourself against your own deck. `z` covers them all:
+
+```
+   # TERM                   POS  DEFINITION          STATUS    STATE  DUE
+▌  1 Abash                  v    ············        —         rev    due
+   2 Abate                  v    ············        —         rev    due
+   3 Abdicate               v    ············        —         rev     6d
+```
+
+The words keep their pronunciation and part of speech; the `DEFINITION` column
+and the `card` pane are both covered, examples included — a sentence using the
+word gives away as much as the gloss does. `z` again brings everything back.
+The border reads `hidden` while it is on, and nothing is written to your
+collection: it is a way of looking at the list, not a setting, so it is gone
+the next time you open the deck.
+
+Work down the list recalling each meaning, and press `space` to uncover just
+the word under the cursor when you want to check yourself. Moving off it covers
+it again, so the row below is never already answered.
+
+Nothing here grades anything or touches a due date. For answers that count
+towards the schedule, study the deck with `s`, or drill a status with `M`.
 
 ## Commands
 

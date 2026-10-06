@@ -452,6 +452,12 @@ fn render_decks(frame: &mut Frame, app: &mut App, area: Rect) {
     frame.render_stateful_widget(list, rows_area, &mut state);
 }
 
+/// A covered meaning. Dots rather than blanks: a hidden row still has to read
+/// as a row with something behind it, not as a card missing its definition.
+fn mask(columns: usize) -> String {
+    "·".repeat(columns.min(12))
+}
+
 fn count_span(count: usize, color: Color) -> Span<'static> {
     if count == 0 {
         // A dot reads as "nothing here" far faster than a zero does.
@@ -508,6 +514,14 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
             filter.label(),
             app.filter
         ),
+    };
+
+    // Say so in the border: a covered list looks like a deck with no
+    // definitions in it, and you would go looking for the bug.
+    let title = if app.hide_meanings {
+        format!("{title} — hidden")
+    } else {
+        title
     };
 
     let block = panel(&title);
@@ -577,10 +591,17 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
                     format!(" {}", pad(&card.pos, 4)),
                     Style::default().fg(DIM).italic(),
                 ),
-                Span::styled(
-                    format!(" {}", pad(&card.definition, definition_width)),
-                    Style::default().fg(TEXT),
-                ),
+                if app.meaning_hidden(row) {
+                    Span::styled(
+                        format!(" {}", pad(&mask(definition_width), definition_width)),
+                        Style::default().fg(DIM),
+                    )
+                } else {
+                    Span::styled(
+                        format!(" {}", pad(&card.definition, definition_width)),
+                        Style::default().fg(TEXT),
+                    )
+                },
                 Span::styled(
                     format!(" {}", pad(&status_text, STATUS_WIDTH)),
                     Style::default().fg(study_color(card.status)).bold(),
@@ -643,18 +664,29 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
         .selected_card()
         .and_then(|(deck_id, index)| app.db.deck_by_id(deck_id).and_then(|d| d.cards.get(index)));
 
+    // The pane is the answer sheet, so `z` has to cover it too — otherwise
+    // the definition is masked in the list and spelled out an inch below it.
+    let hidden = app.meaning_hidden(app.browse_sel);
+
     let (lines, rows) = match card {
         Some(card) => {
             let mut lines = vec![card_head(card), Line::from("")];
-            lines.extend(card_body(card, width));
+            if hidden {
+                lines.extend(card_body_hidden(width));
+            } else {
+                lines.extend(card_body(card, width));
+            }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 scheduling_summary(card),
                 Style::default().fg(DIM),
             )));
             // Everything bar the definition is already wrapped to `width`.
-            let rows =
-                lines.len() + wrapped_lines(&card.definition, width).saturating_sub(1) as usize;
+            let rows = if hidden {
+                lines.len()
+            } else {
+                lines.len() + wrapped_lines(&card.definition, width).saturating_sub(1) as usize
+            };
             (lines, rows)
         }
         None => (
@@ -706,6 +738,19 @@ fn card_head(card: &Card) -> Line<'static> {
         ));
     }
     Line::from(head)
+}
+
+/// The same pane with `z` on. The examples go too, not just the definition:
+/// a sentence using the word gives away as much as the gloss does.
+fn card_body_hidden(width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(mask(width), Style::default().fg(DIM))),
+        Line::from(""),
+        Line::from(Span::styled(
+            "space to show this one, z to show them all",
+            Style::default().fg(DIM).italic(),
+        )),
+    ]
 }
 
 /// Everything behind the word: definition, examples, notes. Shared by the
@@ -1527,10 +1572,28 @@ BROWSING
   a / o          add a card                dd          delete card
   u              undo a delete             x           suspend / unsuspend
   m              cycle the STATUS column   :marked     show only flagged
+  z              hide / show meanings      space       check the one word
 
   The selected word is shown in full in the `card` pane below the list, where
   the terminal is tall enough. `…` in its border means there is more than
   fits; Enter opens the whole thing in the editor.
+
+PRACTISING FROM THE LIST
+  z covers every meaning in the browser — the DEFINITION column and the card
+  pane both — leaving the words, their pronunciation and their part of speech.
+  Press it again and they all come back. The border says `hidden` while it is
+  on, and nothing is written to your collection: it is a way of looking at the
+  list, not a setting.
+
+  Work down the list recalling each meaning, and press space to uncover just
+  the word under the cursor when you want to check yourself. Moving off it
+  covers it again, so the row below is never already answered.
+
+  z              hide every meaning        z again     show them all
+  space          uncover this word         j / k       on to the next
+
+  Nothing here grades anything or touches a due date. For answers that count
+  towards the schedule, study the deck with s or drill a status with M.
 
 REVIEWING
   space          reveal the answer         space       again: grade Good

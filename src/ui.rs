@@ -447,9 +447,13 @@ fn render_decks(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(Style::default().bg(SEL_BG).bold())
         .highlight_symbol("▌");
 
-    let mut state = ListState::default();
+    // Start from the window we drew last time: the widget then scrolls by the
+    // least it can to keep the cursor in view, so going back up walks the
+    // cursor up the window instead of pinning it to the bottom row.
+    let mut state = ListState::default().with_offset(app.decks_off);
     state.select(Some(app.decks_sel));
     frame.render_stateful_widget(list, rows_area, &mut state);
+    app.decks_off = state.offset();
 }
 
 /// A covered meaning. Dots rather than blanks: a hidden row still has to read
@@ -644,11 +648,14 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
         .highlight_style(Style::default().bg(SEL_BG))
         .highlight_symbol("▌");
 
-    let mut state = ListState::default();
+    // Carried over from the last frame, so the window only moves when the
+    // cursor would otherwise leave it. See `render_decks`.
+    let mut state = ListState::default().with_offset(app.browse_off);
     if !app.rows.is_empty() {
         state.select(Some(app.browse_sel));
     }
     frame.render_stateful_widget(list, rows_area, &mut state);
+    app.browse_off = state.offset();
 
     if let Some(preview_area) = preview_area {
         render_preview(frame, app, preview_area);

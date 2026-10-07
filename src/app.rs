@@ -283,9 +283,14 @@ pub struct App {
     /// Cursor position in the deck list. A position, so it is clamped rather
     /// than looked up when decks come and go.
     pub decks_sel: usize,
+    /// First deck row on screen. Kept between frames, or every redraw would
+    /// start at the top and drag the cursor to the bottom of the window.
+    pub decks_off: usize,
     /// Id of the deck the browser is showing; `0` when there is none.
     pub browse_deck: u64,
     pub browse_sel: usize,
+    /// First card row on screen, as `decks_off` is for the deck list.
+    pub browse_off: usize,
     /// Indices into the browsed deck's cards, after filtering.
     pub rows: Vec<usize>,
     pub filter: String,
@@ -345,8 +350,10 @@ impl App {
             screen: Screen::Decks,
             mode: Mode::Normal,
             decks_sel: 0,
+            decks_off: 0,
             browse_deck: 0,
             browse_sel: 0,
+            browse_off: 0,
             rows: Vec::new(),
             filter: String::new(),
             status_filter: StatusFilter::default(),
@@ -2476,6 +2483,16 @@ mod tests {
     /// stays available as "no deck".
     const DECK: u64 = 1;
 
+    /// Draw one frame into a throwaway terminal. The window the list ends up
+    /// showing lives in the render, so testing it means rendering.
+    fn draw(app: &mut App, width: u16, height: u16) {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::render(frame, app))
+            .expect("draw");
+    }
+
     fn app_with_cards(count: usize) -> App {
         let mut db = Db::default();
         let index = db.add_deck("test".into());
@@ -3642,6 +3659,61 @@ mod tests {
         app.enter_browse(DECK);
         app.on_key(key('G')).unwrap();
         assert_eq!(app.browse_sel, 8);
+    }
+
+    /// Height 15: a 1-line header, a 1-line status bar, and a panel whose
+    /// border and column header leave ten rows for cards.
+    const ROWS_VISIBLE: usize = 10;
+
+    #[test]
+    fn going_back_up_the_browser_does_not_keep_the_cursor_at_the_bottom() {
+        let mut app = app_with_cards(30);
+        app.enter_browse(DECK);
+        draw(&mut app, 100, 15);
+        assert_eq!(app.browse_off, 0, "a fresh list starts at the top");
+
+        // Down past the window: it scrolls, and the cursor rides the last row.
+        app.on_key(key('2')).unwrap();
+        app.on_key(key('0')).unwrap();
+        app.on_key(key('j')).unwrap();
+        draw(&mut app, 100, 15);
+        assert_eq!(app.browse_sel, 20);
+        assert_eq!(app.browse_off, 20 + 1 - ROWS_VISIBLE);
+
+        // Back up five rows. The cursor is still inside the window, so the
+        // window stays where it is instead of redrawing from the top and
+        // dragging the cursor back down to the bottom row.
+        for _ in 0..5 {
+            app.on_key(key('k')).unwrap();
+        }
+        draw(&mut app, 100, 15);
+        assert_eq!(app.browse_sel, 15);
+        assert_eq!(app.browse_off, 11, "the window did not follow");
+
+        // Keep going and it scrolls again, now from the top row.
+        for _ in 0..5 {
+            app.on_key(key('k')).unwrap();
+        }
+        draw(&mut app, 100, 15);
+        assert_eq!(app.browse_sel, 10);
+        assert_eq!(app.browse_off, 10);
+    }
+
+    #[test]
+    fn the_deck_list_keeps_its_window_too() {
+        let mut app = app_with_cards(1);
+        for i in 0..30 {
+            app.db.add_deck(format!("deck{i}"));
+        }
+        app.on_key(key('G')).unwrap();
+        draw(&mut app, 100, 15);
+        let last = app.db.decks.len() - 1;
+        assert_eq!(app.decks_sel, last);
+        assert_eq!(app.decks_off, last + 1 - ROWS_VISIBLE);
+
+        app.on_key(key('k')).unwrap();
+        draw(&mut app, 100, 15);
+        assert_eq!(app.decks_off, last + 1 - ROWS_VISIBLE, "unchanged");
     }
 
     #[test]

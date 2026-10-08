@@ -811,6 +811,21 @@ fn card_body(card: &Card, width: usize) -> Vec<Line<'static>> {
         }
     }
 
+    // Look-alikes last, under their own heading, so the word you just learnt
+    // is set apart from the ones it is so often mistaken for.
+    let mut confusables = card.confusables().peekable();
+    if confusables.peek().is_some() {
+        let confusable = Prose::confusable();
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  don't confuse with",
+            Style::default().fg(WARN).italic(),
+        )));
+        for text in confusables {
+            lines.extend(wrap_prose(&confusable, text, width));
+        }
+    }
+
     lines
 }
 
@@ -1115,6 +1130,16 @@ impl Prose {
             emphasis: Style::default().fg(MARK).italic(),
         }
     }
+
+    /// A word easily mistaken for this one, behind a "not equal" mark.
+    fn confusable() -> Self {
+        Self {
+            marker: Span::styled("  ≠ ", Style::default().fg(WARN)),
+            continuation: Span::raw("    "),
+            body: Style::default().fg(TEXT),
+            emphasis: Style::default().fg(MARK).bold().italic(),
+        }
+    }
 }
 
 /// Word-wrap `text` into `width` columns behind the block's marker, giving
@@ -1291,13 +1316,13 @@ fn bar_rows(data: &[(chrono::NaiveDate, u64)], color: Color) -> Vec<Line<'static
 /// Rows each field gets: what its text needs, within reason, shrinking the
 /// greediest field first when the form will not fit. Term, Pron and Pos never
 /// need more than a line; Example and Notes get room to be read instead of
-/// trailing off the edge.
-fn field_heights(available: u16, needs: [u16; 6]) -> [u16; 6] {
-    const CEILING: [u16; 6] = [1, 1, 1, 3, 8, 8];
+/// trailing off the edge, and Confusing a few lines for its look-alikes.
+fn field_heights(available: u16, needs: [u16; FIELDS.len()]) -> [u16; FIELDS.len()] {
+    const CEILING: [u16; FIELDS.len()] = [1, 1, 1, 3, 8, 8, 3];
     // One blank row between fields.
     let gaps = FIELDS.len() as u16 - 1;
 
-    let mut heights = [1u16; 6];
+    let mut heights = [1u16; FIELDS.len()];
     for (height, (need, ceiling)) in heights.iter_mut().zip(needs.iter().zip(CEILING)) {
         *height = (*need).clamp(1, ceiling);
     }
@@ -1442,7 +1467,7 @@ fn render_editor(frame: &mut Frame, app: &App, area: Rect) {
         .map(|field| wrap_field(field.value(), width))
         .collect();
 
-    let mut needs = [1u16; 6];
+    let mut needs = [1u16; FIELDS.len()];
     for (need, lines) in needs.iter_mut().zip(wrapped.iter()) {
         *need = lines.len() as u16;
     }
@@ -1739,7 +1764,7 @@ SCHEDULING
 
 CSV FORMAT
   Recognised headers, in any order:
-      term, pron, pos, definition, example, notes
+      term, pron, pos, definition, example, notes, confusing
   Without a header row, columns are read as term, definition, example.
   Re-importing a file updates existing terms instead of duplicating them,
   so your scheduling survives a corrected export.
@@ -1967,6 +1992,30 @@ mod tests {
     }
 
     #[test]
+    fn confusing_words_close_the_card() {
+        let mut card = Card::new(
+            1,
+            "affect".into(),
+            "to influence".into(),
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 1).unwrap(),
+        );
+        card.notes = "a note".into();
+        card.confusing = "effect — a result\n\neffete".into();
+        let text: Vec<String> = card_body(&card, 60).iter().map(flat).collect();
+        let heading = text.iter().position(|l| l.contains("don't confuse with"));
+        let note = text.iter().position(|l| l.contains("a note"));
+        assert!(heading > note, "after the notes: {text:?}");
+        assert_eq!(
+            &text[heading.unwrap() + 1..],
+            ["  ≠ effect — a result", "  ≠ effete"]
+        );
+
+        card.confusing.clear();
+        let text: Vec<String> = card_body(&card, 60).iter().map(flat).collect();
+        assert!(!text.iter().any(|l| l.contains("confuse")), "{text:?}");
+    }
+
+    #[test]
     fn notes_carry_a_gutter_on_every_line() {
         let text = "To do something without shame or embarrassment is to do it \
                     unabashedly, which is a longer note than one line holds.";
@@ -2068,17 +2117,21 @@ mod tests {
     #[test]
     fn fields_are_sized_to_what_they_hold() {
         // Room to spare: every field gets what it asks for, prose capped.
-        let heights = field_heights(40, [1, 1, 1, 2, 6, 20]);
-        assert_eq!(heights, [1, 1, 1, 2, 6, 8], "Notes capped at eight rows");
+        let heights = field_heights(40, [1, 1, 1, 2, 6, 20, 5]);
+        assert_eq!(
+            heights,
+            [1, 1, 1, 2, 6, 8, 3],
+            "Notes capped at eight rows, Confusing at three"
+        );
 
         // An empty card still gets a row per field to type into.
-        assert_eq!(field_heights(40, [0, 0, 0, 0, 0, 0]), [1; 6]);
+        assert_eq!(field_heights(40, [0; 7]), [1; 7]);
 
         // Tight: the greediest field gives rows up until the form fits.
-        let heights = field_heights(12, [1, 1, 1, 3, 8, 8]);
+        let heights = field_heights(14, [1, 1, 1, 3, 8, 8, 3]);
         assert_eq!(
-            heights.iter().sum::<u16>() + 5,
-            12,
+            heights.iter().sum::<u16>() + 6,
+            14,
             "fields plus the gaps between them fill the height exactly"
         );
         assert!(
@@ -2088,7 +2141,7 @@ mod tests {
 
         // Nothing left to give: every field keeps its single row and the
         // dialog is simply taller than the terminal, which clamps it.
-        assert_eq!(field_heights(1, [4, 4, 4, 4, 4, 4]), [1; 6]);
+        assert_eq!(field_heights(1, [4; 7]), [1; 7]);
     }
 
     #[test]

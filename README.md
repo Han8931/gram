@@ -409,12 +409,18 @@ something for non-Latin decks.
 Recognised headers, in any order:
 
 ```
-term, pron, pos, definition, example, notes
+term, pron, pos, definition, example, notes, confusing
 ```
 
 Without a header row, columns are read as `term, definition, example`. Tabs are
-detected from a `.tsv` extension or by sniffing the first line. `example` and
-`notes` may hold several lines.
+detected from a `.tsv` extension or by sniffing the first line. `example`,
+`notes` and `confusing` may hold several lines.
+
+`confusing` lists words easily mistaken for this one, one per line, each
+optionally followed by how it differs (`effect — a result, usually a noun`).
+They close the card under a *don't confuse with* heading. The column may also
+be headed `confusable`, `confused with`, `lookalike` or `similar`, and in the
+card editor it is the last field.
 
 Re-importing matches on the term and **updates** the card rather than
 duplicating it, so scheduling survives a corrected export.

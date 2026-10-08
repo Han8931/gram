@@ -47,8 +47,16 @@ impl Mode {
     }
 }
 
-/// The six editable fields of a card, in tab order.
-pub const FIELDS: [&str; 6] = ["Term", "Pron", "Pos", "Definition", "Example", "Notes"];
+/// The editable fields of a card, in tab order.
+pub const FIELDS: [&str; 7] = [
+    "Term",
+    "Pron",
+    "Pos",
+    "Definition",
+    "Example",
+    "Notes",
+    "Confusing",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditTarget {
@@ -79,6 +87,7 @@ impl Editor {
             card.definition.as_str(),
             card.example.as_str(),
             card.notes.as_str(),
+            card.confusing.as_str(),
         ];
         Self {
             target: EditTarget::Existing {
@@ -446,6 +455,7 @@ impl App {
                         || card.term.to_lowercase().contains(&needle)
                         || card.definition.to_lowercase().contains(&needle)
                         || card.notes.to_lowercase().contains(&needle)
+                        || card.confusing.to_lowercase().contains(&needle)
                 })
                 .map(|(i, _)| i)
                 .collect(),
@@ -854,6 +864,7 @@ impl App {
                 card.pos = values[2].clone();
                 card.example = values[4].clone();
                 card.notes = values[5].clone();
+                card.confusing = values[6].clone();
                 deck.cards.push(card);
                 self.info(format!("added {}", values[0]));
             }
@@ -873,6 +884,7 @@ impl App {
                 existing.definition = values[3].clone();
                 existing.example = values[4].clone();
                 existing.notes = values[5].clone();
+                existing.confusing = values[6].clone();
                 self.info(format!("saved {}", values[0]));
             }
         }
@@ -2588,19 +2600,6 @@ mod tests {
     }
 
     #[test]
-    fn answering_good_advances_the_queue_and_logs() {
-        let mut app = app_with_cards(3);
-        app.db.decks[0].new_per_day = 100;
-        app.start_session(DECK, Scope::Due);
-        assert_eq!(app.session.as_ref().unwrap().queue.len(), 3);
-
-        app.answer(Grade::Good);
-        assert_eq!(app.session.as_ref().unwrap().queue.len(), 2);
-        assert_eq!(app.db.log.len(), 1);
-        assert_eq!(app.db.decks[0].intro_count, 1);
-    }
-
-    #[test]
     fn study_more_adds_new_cards_past_the_days_ration() {
         let mut app = app_with_cards(10);
         app.db.decks[0].new_per_day = 3;
@@ -2635,6 +2634,19 @@ mod tests {
         assert!(app.session.is_none());
         app.run_command("study marked 5");
         assert!(app.session.is_none());
+    }
+
+    #[test]
+    fn answering_good_advances_the_queue_and_logs() {
+        let mut app = app_with_cards(3);
+        app.db.decks[0].new_per_day = 100;
+        app.start_session(DECK, Scope::Due);
+        assert_eq!(app.session.as_ref().unwrap().queue.len(), 3);
+
+        app.answer(Grade::Good);
+        assert_eq!(app.session.as_ref().unwrap().queue.len(), 2);
+        assert_eq!(app.db.log.len(), 1);
+        assert_eq!(app.db.decks[0].intro_count, 1);
     }
 
     #[test]

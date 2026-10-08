@@ -202,6 +202,11 @@ pub struct Card {
     pub example: String,
     #[serde(default)]
     pub notes: String,
+    /// Words this one is easily mixed up with, one per line, each optionally
+    /// followed by how they differ: `affect — to influence (a verb)`. Left
+    /// out of the collection when empty, so older files stay as they were.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub confusing: String,
 
     // -- scheduling state --
     #[serde(default = "default_ease")]
@@ -242,6 +247,7 @@ impl Card {
             definition,
             example: String::new(),
             notes: String::new(),
+            confusing: String::new(),
             ease: DEFAULT_EASE,
             interval: 0,
             reps: 0,
@@ -266,6 +272,10 @@ impl Card {
 
     pub fn examples(&self) -> impl Iterator<Item = &str> {
         self.example.lines().filter(|l| !l.trim().is_empty())
+    }
+
+    pub fn confusables(&self) -> impl Iterator<Item = &str> {
+        self.confusing.lines().filter(|l| !l.trim().is_empty())
     }
 
     /// Reset all scheduling state, keeping the content.

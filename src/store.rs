@@ -216,19 +216,27 @@ enum Column {
     Definition,
     Example,
     Notes,
+    Confusing,
     Ignore,
 }
 
 fn classify(header: &str) -> Column {
-    let h = header.trim().to_ascii_lowercase();
-    let h = h.trim_matches(|c: char| !c.is_ascii_alphanumeric());
-    match h {
+    // Spaces and punctuation go too, so `Part of speech` and `confused with`
+    // match their run-together spellings below.
+    let h: String = header
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    match h.as_str() {
         "term" | "word" | "front" | "headword" | "vocab" | "vocabulary" => Column::Term,
         "pron" | "pronunciation" | "phonetic" | "ipa" | "say" => Column::Pron,
         "pos" | "part" | "partofspeech" | "speech" | "type" => Column::Pos,
         "definition" | "def" | "meaning" | "back" | "translation" | "gloss" => Column::Definition,
         "example" | "examples" | "sentence" | "sentences" | "usage" | "context" => Column::Example,
         "notes" | "note" | "extra" | "comment" | "related" => Column::Notes,
+        "confusing" | "confusable" | "confusables" | "confused" | "confusedwith"
+        | "lookalike" | "lookalikes" | "similar" => Column::Confusing,
         _ => Column::Ignore,
     }
 }
@@ -254,6 +262,7 @@ fn positional(width: usize) -> Vec<Column> {
                 Column::Definition,
                 Column::Example,
                 Column::Notes,
+                Column::Confusing,
             ];
             cols.truncate(width);
             cols.resize(width, Column::Ignore);
@@ -326,7 +335,7 @@ pub fn import_csv(
     };
 
     let mut ingest = |record: &csv::StringRecord, report: &mut ImportReport| {
-        let mut fields = [""; 6];
+        let mut fields = [""; 7];
         for (i, value) in record.iter().enumerate() {
             let slot = match columns.get(i) {
                 Some(Column::Term) => 0,
@@ -335,11 +344,12 @@ pub fn import_csv(
                 Some(Column::Definition) => 3,
                 Some(Column::Example) => 4,
                 Some(Column::Notes) => 5,
+                Some(Column::Confusing) => 6,
                 _ => continue,
             };
             fields[slot] = value.trim();
         }
-        let [term, pron, pos, definition, example, notes] = fields;
+        let [term, pron, pos, definition, example, notes, confusing] = fields;
         if term.is_empty() || definition.is_empty() {
             report.skipped += 1;
             return;
@@ -356,6 +366,7 @@ pub fn import_csv(
             existing.definition = definition.to_string();
             existing.example = example.to_string();
             existing.notes = notes.to_string();
+            existing.confusing = confusing.to_string();
             report.updated += 1;
         } else {
             let mut card = Card::new(
@@ -368,6 +379,7 @@ pub fn import_csv(
             card.pos = pos.to_string();
             card.example = example.to_string();
             card.notes = notes.to_string();
+            card.confusing = confusing.to_string();
             deck.cards.push(card);
             report.added += 1;
         }
@@ -392,7 +404,15 @@ pub fn export_csv(deck: &Deck, path: &Path) -> Result<usize> {
     }
     let mut writer =
         csv::Writer::from_path(path).with_context(|| format!("writing {}", path.display()))?;
-    writer.write_record(["term", "pron", "pos", "definition", "example", "notes"])?;
+    writer.write_record([
+        "term",
+        "pron",
+        "pos",
+        "definition",
+        "example",
+        "notes",
+        "confusing",
+    ])?;
     for card in &deck.cards {
         writer.write_record([
             &card.term,
@@ -401,6 +421,7 @@ pub fn export_csv(deck: &Deck, path: &Path) -> Result<usize> {
             &card.definition,
             &card.example,
             &card.notes,
+            &card.confusing,
         ])?;
     }
     writer.flush()?;
@@ -654,6 +675,27 @@ mod tests {
         assert_eq!(deck.cards[0].term, "abash");
         assert_eq!(deck.cards[0].definition, "to embarrass");
         assert_eq!(deck.cards[0].pos, "v");
+    }
+
+    #[test]
+    fn imports_confusing_words() {
+        let (deck, _) = import_str(
+            "term,definition,confused with\n\
+             affect,to influence,\"effect — a result\neffete\"\n",
+            "confusing.csv",
+        );
+        assert_eq!(deck.cards[0].confusing, "effect — a result\neffete");
+        assert_eq!(
+            deck.cards[0].confusables().collect::<Vec<_>>(),
+            ["effect — a result", "effete"]
+        );
+    }
+
+    #[test]
+    fn an_empty_confusing_field_stays_out_of_the_collection() {
+        let card = Card::new(1, "abash".into(), "to embarrass".into(), today());
+        let json = serde_json::to_string(&card).unwrap();
+        assert!(!json.contains("confusing"), "{json}");
     }
 
     #[test]

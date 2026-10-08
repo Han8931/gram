@@ -1835,6 +1835,10 @@ impl App {
 
             KeyCode::Char('j') | KeyCode::Down => self.scroll(count),
             KeyCode::Char('k') | KeyCode::Up => self.scroll(-count),
+            // Shift-] and Shift-[ — ten rows a press, for a long list where
+            // j and k are too slow and Ctrl-d is a stretch. `3}` goes thirty.
+            KeyCode::Char('}') => self.scroll(10 * count),
+            KeyCode::Char('{') => self.scroll(-10 * count),
             KeyCode::Char('d') if ctrl => self.scroll(10),
             KeyCode::Char('u') if ctrl => self.scroll(-10),
             KeyCode::Char('f') if ctrl => self.scroll(20),
@@ -3627,6 +3631,19 @@ mod tests {
         app.on_key(key('5')).unwrap();
         app.on_key(key('j')).unwrap();
         assert_eq!(app.browse_sel, 5);
+    }
+
+    #[test]
+    fn braces_move_ten_rows_at_a_time() {
+        let mut app = app_with_cards(40);
+        app.enter_browse(DECK);
+        app.on_key(key('}')).unwrap();
+        assert_eq!(app.browse_sel, 10);
+        app.on_key(key('2')).unwrap();
+        app.on_key(key('}')).unwrap();
+        assert_eq!(app.browse_sel, 30);
+        app.on_key(key('{')).unwrap();
+        assert_eq!(app.browse_sel, 20);
     }
 
     #[test]

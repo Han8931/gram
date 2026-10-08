@@ -96,7 +96,7 @@ Everything is modal and Vim-shaped.
 
 | | |
 |---|---|
-| `j` `k` `gg` `G` `5j` `5G` `Ctrl-d/u` | move — or scroll a long answer while reviewing |
+| `j` `k` `gg` `G` `5j` `5G` `Ctrl-d/u` `{` `}` | move — or scroll a long answer while reviewing |
 | `h` `l` `Enter` `q` `Esc` | back / forward |
 | `s` | study the selected deck |
 | `space` | reveal the answer |

@@ -1614,6 +1614,7 @@ MOVING AROUND
   j / k          down / up                 gg / G      first / last
   5j             down five                 5G / 5gg    jump to line 5
   Ctrl-d/u       half page                 :42         jump to line 42
+  { / }          up / down ten rows        3}          down thirty
   h / l          back / forward            Enter       open
   q / Esc        back one screen           ZZ          save and quit
   ?              this help                 S           statistics

@@ -1,10 +1,17 @@
 /target
 
-# Extracted from copyrighted books — keep them local.
+# The books themselves are never redistributed. The decks extracted from them
+# are tracked, so keep this repository private.
 *.epub
-/decks/
 
 __pycache__/
+
+# `data/collection.json` is the live collection — $XDG_DATA_HOME/gram is a
+# symlink to `data/`, so gram writes here and the progress is tracked. The
+# scratch files it leaves beside the collection are not worth a commit.
+/data/collection.conflict-*.json
+/data/*.tmp
+/data/*.bak
 
 # Local Claude Code settings.
 /.claude/settings.local.json

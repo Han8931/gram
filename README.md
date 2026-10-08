@@ -50,14 +50,21 @@ cargo build --release
 
 ## Getting started
 
-gram ships without decks — the Word Smart word list is copyrighted, so you
-build `decks/` from your own copy of the EPUB first:
+`decks/` holds the extracted word lists and `data/collection.json` the
+collection built from them, so a clone comes with the decks and their
+schedules — and, because that word list is copyrighted, this repository stays
+private. From a clean start, import what you want to study:
 
 ```sh
-python3 tools/extract_wordsmart.py word_smart.epub decks/
 gram import decks/word_smart.csv "Word Smart"                  # 832 cards
 gram import decks/word_smart_foreign.csv "Foreign Phrases"     #  33 cards
 gram                                                           # start studying
+```
+
+Rebuilding a deck from the book needs your own copy of the EPUB:
+
+```sh
+python3 tools/extract_wordsmart.py word_smart.epub decks/
 ```
 
 Any CSV works, though — see [CSV format](#csv-format) if you would rather bring
@@ -317,7 +324,14 @@ The collection is one JSON file:
 $GRAM_DATA  →  $XDG_DATA_HOME/gram/collection.json  →  ~/.local/share/gram/collection.json
 ```
 
-`gram path` prints the resolved location. Writes go through a temp file and a
+`gram path` prints the resolved location. In this checkout
+`$XDG_DATA_HOME/gram` is a symlink to `data/`, so the collection gram writes is
+the tracked `data/collection.json` and studying shows up as a diff. Note the
+symlink is on the *directory*: a save renames a temp file into place, which
+would replace a symlinked collection file with a regular one on the first
+write.
+
+Writes go through a temp file and a
 rename, so an interrupted save cannot truncate your collection. The temp file
 carries the writing process's pid, so two gram instances cannot rename each
 other's half-written file into place.
@@ -450,8 +464,9 @@ threatening evil
   │ Connotation: n positive, v negative.
 ```
 
-Neither EPUB is redistributed — point the scripts at your own copies. `decks/`
-and `*.epub` are both git-ignored for the same reason.
+Neither EPUB is redistributed — point the scripts at your own copies, which
+stay git-ignored. The extracted `decks/` are tracked, as is the collection
+built from them, so **keep this repository private.**
 
 ## Development
 

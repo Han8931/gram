@@ -132,6 +132,9 @@ fn unescape(text: &str) -> String {
 pub enum Scope {
     /// Everything due today, plus the day's ration of new cards.
     Due,
+    /// Like `Due`, with this many new cards on top of the day's ration — a
+    /// one-off for a day you want to push further, leaving `new_per_day` be.
+    More(u32),
     /// Words carrying a status, regardless of when they are next due.
     /// `None` means any status at all.
     Flagged(Option<Study>),
@@ -141,6 +144,7 @@ impl Scope {
     pub fn label(self) -> &'static str {
         match self {
             Self::Due => "due",
+            Self::More(_) => "more",
             Self::Flagged(None) => "flagged",
             Self::Flagged(Some(status)) => status.label(),
         }
@@ -148,7 +152,7 @@ impl Scope {
 
     fn matches(self, card: &Card) -> bool {
         match self {
-            Self::Due => true,
+            Self::Due | Self::More(_) => true,
             Self::Flagged(None) => card.is_flagged(),
             Self::Flagged(Some(status)) => card.status == status,
         }
@@ -478,7 +482,11 @@ impl App {
             .filter(|c| c.is_due(today))
             .map(|c| c.id)
             .collect();
-        let allowance = deck.new_allowance(today) as usize;
+        let extra = match scope {
+            Scope::More(extra) => extra,
+            _ => 0,
+        };
+        let allowance = deck.new_allowance(today).saturating_add(extra) as usize;
         let mut fresh: Vec<u64> = deck
             .cards
             .iter()
@@ -513,7 +521,10 @@ impl App {
                 .map(|d| d.name.clone())
                 .unwrap_or_default();
             self.info(match scope {
-                Scope::Due => format!("{name}: nothing due — come back tomorrow"),
+                Scope::Due => format!(
+                    "{name}: nothing due — come back tomorrow, or :study more for extra new cards"
+                ),
+                Scope::More(_) => format!("{name}: nothing due and no unseen cards left"),
                 Scope::Flagged(None) => {
                     format!("{name}: no words have a status — press m to set one")
                 }
@@ -539,7 +550,7 @@ impl App {
         self.card_scroll = 0;
         self.screen = Screen::Review;
         self.info(match scope {
-            Scope::Due => format!("studying {initial} cards — space to reveal"),
+            Scope::Due | Scope::More(_) => format!("studying {initial} cards — space to reveal"),
             Scope::Flagged(_) => format!(
                 "drilling {initial} {} words — space to reveal",
                 scope.label()
@@ -2128,15 +2139,44 @@ impl App {
             "import" => self.cmd_import(rest),
             "export" => self.cmd_export(rest),
             "study" | "s" => {
-                let scope = match rest {
+                let (name, count) = match rest.split_once(char::is_whitespace) {
+                    Some((name, count)) => (name, Some(count.trim())),
+                    None => (rest, None),
+                };
+                if count.is_some() && !matches!(name, "more" | "extra") {
+                    self.error(format!(
+                        "only :study more takes a number, not :study {name}"
+                    ));
+                    return;
+                }
+                let scope = match name {
                     "" | "due" => Scope::Due,
+                    // `:study more` adds another day's ration; `:study more 30`
+                    // says how many.
+                    "more" | "extra" => {
+                        let extra = match count {
+                            Some(count) => match count.parse::<u32>() {
+                                Ok(extra) if extra > 0 => extra,
+                                _ => {
+                                    self.error(format!("not a positive number: {count}"));
+                                    return;
+                                }
+                            },
+                            None => self
+                                .active_deck()
+                                .and_then(|id| self.db.deck_by_id(id))
+                                .map_or(0, |deck| deck.new_per_day)
+                                .max(10),
+                        };
+                        Scope::More(extra)
+                    }
                     "flagged" | "all" => Scope::Flagged(None),
                     other => match Study::parse(other) {
                         Some(Study::None) => Scope::Flagged(None),
                         Some(status) => Scope::Flagged(Some(status)),
                         None => {
                             self.error(format!(
-                                "unknown study scope: {other} (try: due, flagged, review, marked, test)"
+                                "unknown study scope: {other} (try: due, more, flagged, review, marked, test)"
                             ));
                             return;
                         }
@@ -2558,6 +2598,43 @@ mod tests {
         assert_eq!(app.session.as_ref().unwrap().queue.len(), 2);
         assert_eq!(app.db.log.len(), 1);
         assert_eq!(app.db.decks[0].intro_count, 1);
+    }
+
+    #[test]
+    fn study_more_adds_new_cards_past_the_days_ration() {
+        let mut app = app_with_cards(10);
+        app.db.decks[0].new_per_day = 3;
+        app.db.decks[0].spend_new(app.today, 3);
+        assert!(app.build_queue(DECK, Scope::Due).is_empty());
+        assert_eq!(app.build_queue(DECK, Scope::More(4)).len(), 4);
+        assert_eq!(app.build_queue(DECK, Scope::More(50)).len(), 10);
+    }
+
+    #[test]
+    fn study_more_leaves_the_daily_limit_alone() {
+        let mut app = app_with_cards(10);
+        app.db.decks[0].new_per_day = 2;
+        app.run_command("study more 5");
+        assert_eq!(app.session.as_ref().unwrap().queue.len(), 7);
+        assert_eq!(app.db.decks[0].new_per_day, 2);
+    }
+
+    #[test]
+    fn study_more_defaults_to_another_days_ration() {
+        let mut app = app_with_cards(30);
+        app.db.decks[0].new_per_day = 12;
+        app.db.decks[0].spend_new(app.today, 12);
+        app.run_command("study more");
+        assert_eq!(app.session.as_ref().unwrap().queue.len(), 12);
+    }
+
+    #[test]
+    fn only_study_more_takes_a_number() {
+        let mut app = app_with_cards(3);
+        app.run_command("study more zero");
+        assert!(app.session.is_none());
+        app.run_command("study marked 5");
+        assert!(app.session.is_none());
     }
 
     #[test]

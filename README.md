@@ -234,6 +234,7 @@ towards the schedule, study the deck with `s`, or drill a status with `M`.
 :forget                 reset this deck's scheduling
 :status NAME            set this word's status (review|marked|test|none)
 :study NAME             drill one status
+:study more [N]         study N extra new cards today (default: a day's worth)
 :marked [NAME]          browse flagged words, or just one status
 :restore [N|FILE]       list kept collection backups, or put one back
 :study :browse :marked :stats :help
@@ -261,6 +262,11 @@ SM-2, the algorithm behind Anki:
 Ease never falls below 1.3, and intervals always move forward. Each deck
 introduces at most `new_per_day` unseen cards per day, spread evenly through
 the day's review backlog rather than front-loaded.
+
+To push further on a given day, `:study more` runs the due cards plus another
+day's worth of new ones (at least 10), and `:study more 30` asks for exactly
+30 extra. It is a one-off: `new_per_day` stays as it was, and tomorrow's ration
+is the usual one. Use `:set new=N` to change the limit for good.
 
 ### Changing `due` and `state`
 

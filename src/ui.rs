@@ -1690,6 +1690,7 @@ COMMANDS
   :set new=20    new cards per day         :forget     reset this deck's schedule
   :set grading=binary|sm2                  :status NAME    set a word's status
   :study marked  drill one status          :marked NAME    browse one status
+  :study more [N]                          N extra new cards, today only
   :restore       list kept copies          :restore N      put one back
   :study :browse :marked :stats :help
 
@@ -1706,7 +1707,8 @@ SAVING AND RECOVERY
 SCHEDULING
   gram uses SM-2. Again resets the card and shows it again this session;
   Hard, Good and Easy push it further out, scaled by the card's ease factor.
-  Each deck introduces at most `new_per_day` unseen cards per day.
+  Each deck introduces at most `new_per_day` unseen cards per day;
+  :study more goes past that for today without changing the limit.
 
 CSV FORMAT
   Recognised headers, in any order:

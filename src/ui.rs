@@ -545,6 +545,18 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
     // scroll; two digits minimum, or a one-card deck looks ragged.
     let number_width = app.rows.len().to_string().len().max(2);
     let definition_width = width.saturating_sub(term_width + FIXED + number_width + 1);
+    // Pronunciation gets a column when the deck has any and the definition
+    // can spare it — for a Chinese or Japanese deck the reading is half the
+    // word, and the card pane is not always tall enough to show it.
+    const PRON_WIDTH: usize = 16;
+    const MIN_DEFINITION: usize = 20;
+    let show_pron = deck.cards.iter().any(|card| !card.pron.is_empty())
+        && definition_width >= PRON_WIDTH + 1 + MIN_DEFINITION;
+    let definition_width = if show_pron {
+        definition_width - PRON_WIDTH - 1
+    } else {
+        definition_width
+    };
     let today = app.today;
 
     let items: Vec<ListItem> = app
@@ -583,7 +595,7 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
                 other => format!("{} {}", other.glyph(), other.label()),
             };
 
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 // Where the word sits in the list you are looking at — "word
                 // 412 of 832" is how you keep your place in a deck.
                 Span::styled(
@@ -591,6 +603,14 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
                     Style::default().fg(DIM),
                 ),
                 Span::styled(pad(&card.term, term_width), term_style),
+            ];
+            if show_pron {
+                spans.push(Span::styled(
+                    format!(" {}", pad(&card.pron, PRON_WIDTH)),
+                    Style::default().fg(DIM),
+                ));
+            }
+            spans.extend([
                 Span::styled(
                     format!(" {}", pad(&card.pos, 4)),
                     Style::default().fg(DIM).italic(),
@@ -615,34 +635,41 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
                     Style::default().fg(state_color),
                 ),
                 Span::styled(format!(" {due:>4}"), Style::default().fg(due_color).bold()),
-            ]))
+            ]);
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
-    frame.render_widget(
-        table_header(Line::from(vec![
-            Span::styled(
-                format!(" {:>number_width$} ", "#"),
-                Style::default().fg(DIM).bold(),
-            ),
-            Span::styled(
-                format!("{:<width$}", "TERM", width = term_width),
-                Style::default().fg(DIM).bold(),
-            ),
-            Span::styled(format!(" {:<4}", "POS"), Style::default().fg(DIM).bold()),
-            Span::styled(
-                format!(" {:<width$}", "DEFINITION", width = definition_width),
-                Style::default().fg(DIM).bold(),
-            ),
-            Span::styled(
-                format!(" {:<STATUS_WIDTH$}", "STATUS"),
-                Style::default().fg(MARK).bold(),
-            ),
-            Span::styled(format!(" {:<5}", "STATE"), Style::default().fg(DIM).bold()),
-            Span::styled(format!(" {:>4}", "DUE"), Style::default().fg(DIM).bold()),
-        ])),
-        head_area,
-    );
+    let mut header = vec![
+        Span::styled(
+            format!(" {:>number_width$} ", "#"),
+            Style::default().fg(DIM).bold(),
+        ),
+        Span::styled(
+            format!("{:<width$}", "TERM", width = term_width),
+            Style::default().fg(DIM).bold(),
+        ),
+    ];
+    if show_pron {
+        header.push(Span::styled(
+            format!(" {:<PRON_WIDTH$}", "PRON"),
+            Style::default().fg(DIM).bold(),
+        ));
+    }
+    header.extend([
+        Span::styled(format!(" {:<4}", "POS"), Style::default().fg(DIM).bold()),
+        Span::styled(
+            format!(" {:<width$}", "DEFINITION", width = definition_width),
+            Style::default().fg(DIM).bold(),
+        ),
+        Span::styled(
+            format!(" {:<STATUS_WIDTH$}", "STATUS"),
+            Style::default().fg(MARK).bold(),
+        ),
+        Span::styled(format!(" {:<5}", "STATE"), Style::default().fg(DIM).bold()),
+        Span::styled(format!(" {:>4}", "DUE"), Style::default().fg(DIM).bold()),
+    ]);
+    frame.render_widget(table_header(Line::from(header)), head_area);
 
     let list = List::new(items)
         .highlight_style(Style::default().bg(SEL_BG))

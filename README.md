@@ -58,6 +58,8 @@ private. From a clean start, import what you want to study:
 ```sh
 gram import decks/word_smart.csv "Word Smart"                  # 832 cards
 gram import decks/word_smart_foreign.csv "Foreign Phrases"     #  33 cards
+gram import decks/chinese_basic.csv "Chinese Basics"           # 152 cards
+gram import decks/japanese_basic.csv "Japanese Basics"         # 154 cards
 gram                                                           # start studying
 ```
 
@@ -432,6 +434,14 @@ shows your collection, not the directory. Import what you want to study.
 ```sh
 gram import decks/toefl_power_vocab.csv "TOEFL Power Vocab"
 ```
+
+**Chinese and Japanese basics.** Two hand-written starter decks of about 150
+everyday words each: the whole HSK 1 list for Chinese, and core JLPT N5 words
+for Japanese — greetings, pronouns, verbs, adjectives, time words, numbers and
+counters, and the common particles. `pron` holds pinyin with tone marks for Chinese, and
+the kana reading plus romaji for Japanese. Each example sentence carries its
+English translation, and the Chinese notes give the traditional form where it
+differs from the simplified one.
 
 **Word Smart.** Reads the A–Z chapters and the foreign-phrases chapter,
 splitting each headword paragraph into term, pronunciation, part of speech and

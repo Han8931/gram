@@ -1,0 +1,155 @@
+term,pron,pos,definition,example,notes
+こんにちは,konnichiwa,interj,hello; good afternoon,"*こんにちは*、田中です。 — Hello, I'm Tanaka.",The final は is read wa.
+ありがとう,arigatō,interj,thank you,手伝ってくれて*ありがとう*。 — Thanks for helping me.,More polite: ありがとうございます.
+すみません,sumimasen,interj,excuse me; sorry,"*すみません*、駅はどこですか。 — Excuse me, where is the station?",
+さようなら,sayōnara,interj,goodbye,"先生、*さようなら*。 — Goodbye, teacher.",Sounds final; friends say じゃあね or またね.
+はい,hai,interj,yes,"*はい*、そうです。 — Yes, that's right.",
+いいえ,iie,interj,no,"*いいえ*、違います。 — No, that's not right.",
+私,わたし watashi,pron,I; me,*私*は学生です。 — I am a student.,
+あなた,anata,pron,you,*あなた*の名前は何ですか。 — What's your name?,Often avoided; use the person's name with さん instead.
+人,ひと hito,n,person,あの*人*は誰ですか。 — Who is that person?,
+水,みず mizu,n,water,"*水*をください。 — Water, please.",
+食べる,たべる taberu,v,to eat,毎朝パンを*食べます*。 — I eat bread every morning.,"Ichidan (ru-verb): 食べます, 食べない."
+飲む,のむ nomu,v,to drink,お茶を*飲みます*。 — I drink tea.,"Godan (u-verb): 飲みます, 飲まない."
+行く,いく iku,v,to go,学校に*行きます*。 — I go to school.,Irregular te-form: 行って.
+来る,くる kuru,v,to come,友達が*来ます*。 — My friend is coming.,"Irregular: 来ます kimasu, 来ない konai."
+見る,みる miru,v,to see; to watch,テレビを*見ます*。 — I watch TV.,
+話す,はなす hanasu,v,to speak,日本語を*話します*。 — I speak Japanese.,
+する,suru,v,to do,宿題を*します*。 — I do my homework.,Irregular. Turns nouns into verbs: 勉強する “to study”.
+ある,aru,v,to exist (things),机の上に本が*あります*。 — There's a book on the desk.,For people and animals use いる.
+いる,iru,v,"to exist (people, animals)",公園に猫が*います*。 — There's a cat in the park.,For things use ある.
+好き,すき suki,adj,liked; fond of,猫が*好き*です。 — I like cats.,A na-adjective; the thing liked takes が.
+大きい,おおきい ōkii,adj,big,この部屋は*大きい*です。 — This room is big.,
+小さい,ちいさい chiisai,adj,small,*小さい*犬を飼っています。 — I have a small dog.,
+いい,ii,adj,good,今日は天気が*いい*です。 — The weather is nice today.,Conjugates from the older form よい: past よかった.
+今日,きょう kyō,n,today,*今日*は月曜日です。 — Today is Monday.,
+明日,あした ashita,n,tomorrow,*明日*また会いましょう。 — Let's meet again tomorrow.,
+昨日,きのう kinō,n,yesterday,*昨日*は雨でした。 — It rained yesterday.,
+友達,ともだち tomodachi,n,friend,彼女は私の*友達*です。 — She is my friend.,
+家,いえ ie,n,house; home,*家*に帰ります。 — I'm going home.,"Also read うち uchi, “my home”."
+学校,がっこう gakkō,n,school,*学校*は八時に始まります。 — School starts at eight.,
+先生,せんせい sensei,n,teacher,山田*先生*は優しいです。 — Professor Yamada is kind.,Also a title after the name of a teacher or doctor.
+学生,がくせい gakusei,n,student,兄は大*学生*です。 — My older brother is a university student.,
+本,ほん hon,n,book,この*本*は面白いです。 — This book is interesting.,
+お金,おかね okane,n,money,*お金*がありません。 — I don't have any money.,
+一,いち ichi,num,one,*一*月は寒いです。 — January is cold.,Counting things uses ひとつ hitotsu.
+二,に ni,num,two,*二*時に会いましょう。 — Let's meet at two.,Counting things uses ふたつ futatsu.
+三,さん san,num,three,日本に*三*年住んでいます。 — I've lived in Japan for three years.,
+十,じゅう jū,num,ten,*十*時に寝ます。 — I go to bed at ten.,
+何,なに nani,pron,what,*何*を食べますか。 — What will you eat?,"Read なん nan before で, の and counters: 何ですか."
+どこ,doko,pron,where,トイレは*どこ*ですか。 — Where is the restroom?,
+日本,にほん Nihon,n,Japan,*日本*に行きたいです。 — I want to go to Japan.,
+日本語,にほんご nihongo,n,Japanese (language),*日本語*を勉強しています。 — I'm studying Japanese.,
+とても,totemo,adv,very,*とても*忙しいです。 — I'm very busy.,
+か,ka,part,question particle,お元気です*か*。 — How are you?,Ends a polite sentence to make it a question.
+の,no,part,possessive particle,これは私*の*本です。 — This is my book.,
+は,wa,part,topic particle,私*は*学生です。 — I am a student.,"Written は, read wa."
+です,desu,cop,to be (polite),これはペン*です*。 — This is a pen.,
+四,よん yon,num,four,*四*人で行きます。 — Four of us are going.,"Also し shi (四月 shigatsu) and よ yo (四人 yonin, 四時 yoji)."
+五,ご go,num,five,授業は*五*時に終わります。 — Class ends at five.,
+六,ろく roku,num,six,*六*月は雨が多いです。 — It rains a lot in June.,
+七,なな nana,num,seven,*七*時に朝ご飯を食べます。 — I eat breakfast at seven.,"Also しち shichi, as in 七時 shichiji."
+八,はち hachi,num,eight,*八*月は暑いです。 — August is hot.,
+九,きゅう kyū,num,nine,妹は*九*歳です。 — My little sister is nine.,"Also く ku: 九時 kuji, 九月 kugatsu."
+百,ひゃく hyaku,num,hundred,このりんごは*百*円です。 — This apple is 100 yen.,"Sound changes: 三百 sanbyaku, 六百 roppyaku, 八百 happyaku."
+千,せん sen,num,thousand,"この本は*千*円です。 — This book is 1,000 yen.","Sound changes: 三千 sanzen, 八千 hassen."
+一つ,ひとつ hitotsu,num,one (thing),"りんごを*一つ*ください。 — One apple, please.","Native counting: ひとつ, ふたつ, みっつ … up to とお (10)."
+円,えん en,counter,yen,ジュースは百五十*円*です。 — The juice is 150 yen.,
+時,じ ji,counter,o'clock,今、三*時*です。 — It's three o'clock now.,"四時 yoji, 七時 shichiji, 九時 kuji."
+分,ふん fun,counter,minute(s),駅まで十*分*かかります。 — It takes ten minutes to the station.,"Sound changes: 一分 ippun, 三分 sanpun, 十分 juppun."
+歳,さい sai,counter,years old,弟は十*歳*です。 — My little brother is ten.,Twenty years old is usually 二十歳 hatachi.
+今,いま ima,n,now,*今*、忙しいですか。 — Are you busy now?,
+毎日,まいにち mainichi,n,every day,*毎日*日本語を勉強します。 — I study Japanese every day.,
+朝,あさ asa,n,morning,*朝*、シャワーを浴びます。 — I take a shower in the morning.,
+来週,らいしゅう raishū,n,next week,*来週*、京都に行きます。 — I'm going to Kyoto next week.,
+今年,ことし kotoshi,n,this year,*今年*は日本に行きます。 — I'm going to Japan this year.,Special reading; not こんねん.
+時間,じかん jikan,n,time; hour(s),*時間*がありません。 — I don't have time.,After a number it counts hours: 二時間 “two hours”.
+誰,だれ dare,pron,who,これは*誰*のかばんですか。 — Whose bag is this?,
+いつ,itsu,pron,when,誕生日は*いつ*ですか。 — When is your birthday?,
+どう,dō,adv,how; in what way,日本の生活は*どう*ですか。 — How is life in Japan?,
+どれ,dore,pron,which one,あなたのかさは*どれ*ですか。 — Which one is your umbrella?,"For choosing between two, use どちら."
+いくら,ikura,pron,how much (price),このシャツは*いくら*ですか。 — How much is this shirt?,
+どうして,dōshite,adv,why,*どうして*日本語を勉強していますか。 — Why are you studying Japanese?,
+これ,kore,pron,"this (one, near me)",*これ*は何ですか。 — What is this?,これ/それ/あれ/どれ: near me / near you / over there / which.
+それ,sore,pron,"that (one, near you)",*それ*は私のかさです。 — That's my umbrella.,
+この,kono,pron,this (+ noun),*この*料理はおいしいです。 — This dish is delicious.,Always followed by a noun; これ stands alone.
+ここ,koko,pron,here,*ここ*は私の学校です。 — This is my school.,ここ/そこ/あそこ/どこ: here / there / over there / where.
+犬,いぬ inu,n,dog,毎朝*犬*と散歩します。 — I walk my dog every morning.,
+駅,えき eki,n,station,*駅*の近くに住んでいます。 — I live near the station.,
+電車,でんしゃ densha,n,train,*電車*で会社に行きます。 — I go to work by train.,
+仕事,しごと shigoto,n,job; work,*仕事*は何時に終わりますか。 — What time does work finish?,
+名前,なまえ namae,n,name,お*名前*は何ですか。 — What's your name?,Add お when asking someone else's name.
+ご飯,ごはん gohan,n,cooked rice; meal,*ご飯*を二杯食べました。 — I ate two bowls of rice.,"朝ご飯, 昼ご飯, 晩ご飯: breakfast, lunch, dinner."
+お茶,おちゃ ocha,n,tea; green tea,毎朝*お茶*を飲みます。 — I drink tea every morning.,
+雨,あめ ame,n,rain,*雨*が降っています。 — It's raining.,
+電話,でんわ denwa,n,telephone; phone call,夜、母に*電話*します。 — I'll call my mother tonight.,電話する: to make a call; the person called takes に.
+父,ちち chichi,n,(my) father,*父*は銀行で働いています。 — My father works at a bank.,Someone else's father is お父さん otōsan.
+母,はは haha,n,(my) mother,*母*は料理が上手です。 — My mother is a good cook.,Someone else's mother is お母さん okāsan.
+兄,あに ani,n,(my) older brother,*兄*は東京に住んでいます。 — My older brother lives in Tokyo.,
+姉,あね ane,n,(my) older sister,*姉*が二人います。 — I have two older sisters.,
+弟,おとうと otōto,n,(my) younger brother,*弟*はサッカーが好きです。 — My younger brother likes soccer.,
+妹,いもうと imōto,n,(my) younger sister,*妹*は高校生です。 — My younger sister is a high school student.,
+子供,こども kodomo,n,child,*子供*が二人います。 — I have two children.,Also written 子ども.
+銀行,ぎんこう ginkō,n,bank,*銀行*は三時に閉まります。 — The bank closes at three.,
+映画,えいが eiga,n,movie,日曜日に*映画*を見ました。 — I saw a movie on Sunday.,
+中,なか naka,n,inside; in,かばんの*中*に財布があります。 — My wallet is in my bag.,
+上,うえ ue,n,top; on; above,テーブルの*上*にりんごがあります。 — There's an apple on the table.,
+買う,かう kau,v,to buy,スーパーで野菜を*買います*。 — I buy vegetables at the supermarket.,"Godan (u-verb): 買います, 買わない."
+書く,かく kaku,v,to write,毎晩日記を*書きます*。 — I write in my diary every night.,"Godan (u-verb): 書きます, 書かない."
+読む,よむ yomu,v,to read,電車で本を*読みます*。 — I read books on the train.,"Godan (u-verb): 読みます, 読まない."
+聞く,きく kiku,v,to listen; to hear; to ask,毎日音楽を*聞きます*。 — I listen to music every day.,"Godan (u-verb): 聞きます, 聞かない."
+帰る,かえる kaeru,v,to go home; to return,六時に家に*帰ります*。 — I go home at six.,"Godan despite ending in -eru: 帰ります, 帰らない."
+起きる,おきる okiru,v,to get up; to wake up,毎朝六時に*起きます*。 — I get up at six every morning.,"Ichidan (ru-verb): 起きます, 起きない."
+寝る,ねる neru,v,to sleep; to go to bed,十一時に*寝ます*。 — I go to bed at eleven.,"Ichidan (ru-verb): 寝ます, 寝ない."
+会う,あう au,v,to meet,駅で友達に*会います*。 — I'm meeting a friend at the station.,"Godan (u-verb): 会います, 会わない. The person met takes に."
+待つ,まつ matsu,v,to wait (for),バス停でバスを*待ちます*。 — I wait for the bus at the bus stop.,"Godan (u-verb): 待ちます, 待たない."
+分かる,わかる wakaru,v,to understand,この漢字が*分かります*か。 — Do you understand this kanji?,"Godan (u-verb): 分かります, 分からない. What is understood takes が."
+使う,つかう tsukau,v,to use,毎日パソコンを*使います*。 — I use a computer every day.,"Godan (u-verb): 使います, 使わない."
+入る,はいる hairu,v,to enter; to go in,毎晩お風呂に*入ります*。 — I take a bath every night.,"Godan despite ending in -iru: 入ります, 入らない. The place entered takes に."
+出る,でる deru,v,to leave; to go out,八時に家を*出ます*。 — I leave home at eight.,"Ichidan (ru-verb): 出ます, 出ない. The place left takes を."
+乗る,のる noru,v,to ride; to get on,バスに*乗ります*。 — I take the bus.,"Godan (u-verb): 乗ります, 乗らない. The vehicle takes に."
+勉強する,べんきょうする benkyō suru,v,to study,図書館で*勉強します*。 — I study at the library.,"Irregular (する verb): 勉強します, 勉強しない."
+知る,しる shiru,v,to know; to get to know,田中さんを*知っています*か。 — Do you know Mr. Tanaka?,"Godan (u-verb). “I know” is 知っています, but “I don't know” is 知りません."
+住む,すむ sumu,v,to live (somewhere),東京に*住んでいます*。 — I live in Tokyo.,"Godan (u-verb): 住みます, 住まない. Usually 住んでいます; the place takes に."
+高い,たかい takai,adj,expensive; tall; high,この時計は*高い*です。 — This watch is expensive.,
+安い,やすい yasui,adj,cheap,この店は*安い*です。 — This shop is cheap.,
+新しい,あたらしい atarashii,adj,new,*新しい*靴を買いました。 — I bought new shoes.,
+暑い,あつい atsui,adj,hot (weather),"今日は*暑い*ですね。 — It's hot today, isn't it?","Hot to the touch is 熱い, same reading."
+寒い,さむい samui,adj,cold (weather),北海道の冬は*寒い*です。 — Winters in Hokkaido are cold.,Cold to the touch is 冷たい tsumetai.
+おいしい,oishii,adj,delicious; tasty,このケーキは*おいしい*です。 — This cake is delicious.,
+面白い,おもしろい omoshiroi,adj,interesting; funny,この映画は*面白い*です。 — This movie is interesting.,
+難しい,むずかしい muzukashii,adj,difficult,漢字は*難しい*です。 — Kanji are difficult.,
+忙しい,いそがしい isogashii,adj,busy,父はいつも*忙しい*です。 — My father is always busy.,
+楽しい,たのしい tanoshii,adj,fun; enjoyable,旅行は*楽しかった*です。 — The trip was fun.,"i-adjective: past 楽しかった, negative 楽しくない."
+多い,おおい ōi,adj,many; a lot,東京は人が*多い*です。 — Tokyo has a lot of people.,Mostly used at the end of a clause; before a noun use たくさんの.
+悪い,わるい warui,adj,bad,今日は天気が*悪い*です。 — The weather is bad today.,
+近い,ちかい chikai,adj,near; close,家は駅から*近い*です。 — My house is close to the station.,Before a noun use 近くの: 近くの店 “a nearby shop”.
+元気,げんき genki,adj,healthy; energetic; well,子供たちはみんな*元気*です。 — The children are all full of energy.,na-adjective. お元気ですか: “How are you?”
+きれい,kirei,adj,pretty; clean,この部屋は*きれい*です。 — This room is clean.,na-adjective despite ending in い: きれいな花. Kanji 綺麗 is rare.
+静か,しずか shizuka,adj,quiet,この公園は*静か*です。 — This park is quiet.,na-adjective: 静かな町.
+上手,じょうず jōzu,adj,good at; skilled,田中さんはテニスが*上手*です。 — Mr. Tanaka is good at tennis.,na-adjective; the skill takes が. Sounds boastful about yourself.
+大丈夫,だいじょうぶ daijōbu,adj,all right; OK,*大丈夫*ですか。 — Are you all right?,na-adjective.
+便利,べんり benri,adj,convenient,電車はとても*便利*です。 — Trains are very convenient.,na-adjective: 便利な店.
+少し,すこし sukoshi,adv,a little; a few,砂糖を*少し*入れます。 — I add a little sugar.,
+たくさん,takusan,adv,a lot; many,本を*たくさん*読みます。 — I read a lot of books.,
+もう,mō,adv,already; (any) more,*もう*昼ご飯を食べました。 — I've already had lunch.,
+まだ,mada,adv,still; (not) yet,*まだ*食べていません。 — I haven't eaten yet.,“Not yet” uses the ている form: まだ食べていません.
+よく,yoku,adv,often; well,*よく*この店に来ます。 — I often come to this shop.,
+いつも,itsumo,adv,always,朝は*いつも*コーヒーを飲みます。 — I always drink coffee in the morning.,
+ときどき,tokidoki,adv,sometimes,*ときどき*映画を見ます。 — I sometimes watch movies.,Also written 時々.
+あまり,amari,adv,(not) very; (not) much,お酒は*あまり*飲みません。 — I don't drink much alcohol.,Used with a negative verb or adjective.
+一緒に,いっしょに issho ni,adv,together,*一緒に*帰りましょう。 — Let's go home together.,
+が,ga,part,subject particle,誰*が*来ますか。 — Who's coming?,Marks new information and the subject after question words.
+を,o,part,object particle,パン*を*食べます。 — I eat bread.,"Written を, read o."
+に,ni,part,at (time); to (destination); in (location of existence),七時*に*起きます。 — I get up at seven.,
+で,de,part,at (place of action); by (means),図書館*で*勉強します。 — I study at the library.,Compare: 図書館にいます “I'm at the library” (existence uses に).
+へ,e,part,toward; to (direction),来週、大阪*へ*行きます。 — I'm going to Osaka next week.,"Written へ, read e."
+と,to,part,and (between nouns); with,友達*と*映画を見ます。 — I watch movies with a friend.,"Joins nouns only, not verbs or sentences."
+も,mo,part,also; too,私*も*学生です。 — I'm a student too.,"Replaces は, が and を."
+から,kara,part,from; because,授業は九時*から*です。 — Class is from nine.,
+まで,made,part,until; as far as,五時*まで*働きます。 — I work until five.,
+ね,ne,part,sentence-final: isn't it?; right?,"いい天気です*ね*。 — Nice weather, isn't it?",Seeks agreement.
+よ,yo,part,sentence-final: emphasis; you know,"このラーメンはおいしいです*よ*。 — This ramen is good, you know.",Gives the listener new information.
+おはようございます,ohayō gozaimasu,interj,good morning,"*おはようございます*、先生。 — Good morning, teacher.",Casual: おはよう.
+こんばんは,konbanwa,interj,good evening,"*こんばんは*、お元気ですか。 — Good evening, how are you?",The final は is read wa.
+お願いします,おねがいします onegai shimasu,interj,please (requesting),"コーヒーを*お願いします*。 — Coffee, please.",

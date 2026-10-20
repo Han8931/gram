@@ -377,6 +377,10 @@ pub struct Deck {
     /// is a different skill. Both directions share the one schedule.
     #[serde(default, skip_serializing_if = "is_false")]
     pub reverse: bool,
+    /// The voice `p` reads this deck's words in, by the name the speech
+    /// program knows it by. Empty means pick one from the deck's script.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub voice: String,
 }
 
 impl Deck {
@@ -389,6 +393,7 @@ impl Deck {
             intro_date: None,
             intro_count: 0,
             reverse: false,
+            voice: String::new(),
         }
     }
 

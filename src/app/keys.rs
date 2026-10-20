@@ -402,6 +402,11 @@ impl App {
             KeyCode::Char('z') if self.screen == Screen::Browse => self.toggle_hide_meanings(),
             KeyCode::Char(' ') if self.screen == Screen::Browse => self.toggle_peek(),
             KeyCode::Char('S') => self.open_stats(),
+            KeyCode::Char('p')
+                if matches!(self.screen, Screen::Browse | Screen::Card | Screen::Review) =>
+            {
+                self.pronounce()
+            }
             KeyCode::Char('a') | KeyCode::Char('o') => self.open_new_card(),
             // `u` and Ctrl-r walk the change history, as in Vim. Inside a
             // review session `u` means something finer — undo my last answer —

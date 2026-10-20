@@ -205,6 +205,8 @@ pub(super) fn render_card_view(frame: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" edit   ", Style::default().fg(DIM)),
         hint_key("m"),
         Span::styled(" status   ", Style::default().fg(DIM)),
+        hint_key("p"),
+        Span::styled(" say it   ", Style::default().fg(DIM)),
         hint_key("q"),
         Span::styled(" back", Style::default().fg(DIM)),
     ])

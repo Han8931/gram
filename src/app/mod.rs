@@ -10,6 +10,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::complete;
 use crate::model::{Card, CardState, Db, Deck, Grade, Grading, MAX_LOG, ReviewLog, Study};
 use crate::search::{self, Query};
+use crate::speech::{Language, Speaker};
 use crate::store;
 use crate::textinput::TextInput;
 use crate::util::Rng;
@@ -374,6 +375,8 @@ pub struct App {
     pub dirty: bool,
     pub quit: bool,
     rng: Rng,
+    /// `p` — the word said out loud.
+    speaker: Speaker,
 }
 
 impl App {
@@ -415,6 +418,7 @@ impl App {
             dirty: false,
             quit: false,
             rng: Rng::from_entropy(),
+            speaker: Speaker::default(),
         };
         if app.db.decks.is_empty() {
             app.info("no decks yet — press :import <file.csv> or a to add a card");

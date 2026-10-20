@@ -104,6 +104,7 @@ Everything is modal and Vim-shaped.
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
 | `m` `Ctrl-m` | cycle this word's status |
 | `z` | hide / show every meaning in the browser |
+| `p` | say the word out loud |
 | `M` | drill the words carrying a status |
 | `u` `Ctrl-r` | undo / redo a change — or undo the last answer, while reviewing |
 | `a` `o` `i` `dd` `x` | add / edit / delete / suspend a card |
@@ -275,6 +276,7 @@ towards the schedule, study the deck with `s`, or drill a status with `M`.
 :set new=20             new cards introduced per day (per deck)
 :set grading=binary|sm2 which answer bar to show (collection-wide)
 :set reverse=on|off     ask for the word from its meaning (per deck)
+:set voice=NAME         the voice p reads this deck in (per deck; blank = automatic)
 :forget                 reset this deck's scheduling
 :status NAME            set this word's status (review|marked|test|none)
 :study NAME             drill one status
@@ -436,6 +438,26 @@ Accuracy says how the sessions went. Retention says whether the schedule is
 working: if it sits low, the intervals are growing faster than your memory.
 Collections logged before gram recorded which answers came from drills count
 as scheduled reviews, which is what they were unless you were drilling.
+
+## Pronunciation
+
+`p` says the word out loud — in the browser, the word view, or a review once
+the card is turned over. On the question side of a [reverse card](#reverse-cards)
+it refuses, since the word is the answer.
+
+gram speaks with `say` on macOS, or `espeak-ng` / `espeak` elsewhere, and
+picks a voice from the deck's script: a deck with any kana in it is read in
+Japanese, hangul in Korean, Chinese characters in Chinese, and anything else in
+the system's own voice. Judging the deck rather than the word matters: a word
+written all in kanji looks just like Chinese on its own.
+
+To choose for yourself, give the deck a voice by the name the speech program
+knows it by — `say -v '?'` lists them on a Mac:
+
+```
+:set voice=Tingting     this deck in Tingting's voice
+:set voice=             back to choosing from the script
+```
 
 ## Colour
 

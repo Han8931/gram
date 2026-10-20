@@ -87,6 +87,34 @@ impl App {
         });
     }
 
+    /// `p` — say the word under the cursor, or on the card, out loud. Not
+    /// on the question side of a reverse card: the word is the answer.
+    pub(super) fn pronounce(&mut self) {
+        if self.screen == Screen::Review
+            && let Some(session) = self.session.as_ref()
+            && !session.revealed
+            && self.db.deck_by_id(session.deck).is_some_and(|d| d.reverse)
+        {
+            self.error("that would give the word away — reveal it first");
+            return;
+        }
+        let Some((deck_id, card_id)) = self.current_card() else {
+            self.error("no card selected");
+            return;
+        };
+        let Some(deck) = self.db.deck_by_id(deck_id) else {
+            return;
+        };
+        let Some(term) = deck.card(card_id).map(|c| c.term.clone()) else {
+            return;
+        };
+        let language = Language::of(deck.cards.iter().map(|c| c.term.as_str()));
+        let voice = Some(deck.voice.as_str()).filter(|v| !v.is_empty());
+        if let Err(err) = self.speaker.say(&term, voice, language) {
+            self.error(err);
+        }
+    }
+
     pub(super) fn toggle_suspend(&mut self) {
         let Some((deck_id, card_index)) = self.selected_card() else {
             return;

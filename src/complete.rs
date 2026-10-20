@@ -25,7 +25,7 @@ const STATUSES: &[&str] = &["marked", "none", "review", "test"];
 const SCOPES: &[&str] = &["due", "flagged", "marked", "more", "review", "test"];
 
 /// Settings for `:set`, written as the `key=` they are typed with.
-const SETTINGS: &[&str] = &["grading=", "new=", "reverse="];
+const SETTINGS: &[&str] = &["grading=", "new=", "reverse=", "voice="];
 
 /// Values for `:set grading=`.
 const GRADINGS: &[&str] = &["binary", "sm2"];

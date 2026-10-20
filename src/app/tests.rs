@@ -1368,6 +1368,25 @@ fn a_reverse_card_asks_for_the_word_without_showing_it() {
 }
 
 #[test]
+fn p_will_not_say_the_answer_to_a_reverse_card() {
+    let mut app = app_with_words(&["abash"]);
+    app.db.decks[0].reverse = true;
+    app.start_session(DECK, Scope::Due);
+    app.on_key(key('p')).unwrap();
+    assert!(app.status.error, "{}", app.status.text);
+    assert!(app.status.text.contains("reveal"), "{}", app.status.text);
+}
+
+#[test]
+fn set_voice_belongs_to_the_deck_and_blank_clears_it() {
+    let mut app = app_with_cards(1);
+    app.run_command("set voice=Kyoko");
+    assert_eq!(app.db.decks[0].voice, "Kyoko");
+    app.run_command("set voice=");
+    assert_eq!(app.db.decks[0].voice, "");
+}
+
+#[test]
 fn ctrl_c_explains_itself_instead_of_quitting() {
     let mut app = app_with_cards(3);
     app.enter_browse(DECK);

@@ -372,7 +372,7 @@ impl App {
 
     pub(super) fn cmd_set(&mut self, rest: &str) {
         let Some((key, value)) = rest.split_once('=') else {
-            self.error("usage: :set new=<n> | :set grading=binary|sm2 | :set reverse=on|off");
+            self.error("usage: :set new=<n> | grading=binary|sm2 | reverse=on|off | voice=<name>");
             return;
         };
         let value = value.trim();
@@ -431,6 +431,25 @@ impl App {
                     "reverse — recall the word from its meaning"
                 } else {
                     "forward — recall the meaning from the word"
+                });
+            }
+            // Whatever the speech program calls it: `Tingting` for `say`,
+            // `cmn` for espeak. Nothing after the `=` goes back to picking
+            // one from the deck's script.
+            "voice" => {
+                let Some(deck_id) = self.active_deck() else {
+                    self.error("no deck selected");
+                    return;
+                };
+                self.checkpoint("the voice");
+                if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
+                    deck.voice = value.to_string();
+                }
+                self.dirty = true;
+                self.info(if value.is_empty() {
+                    "voice chosen from the deck's script — p to hear it".to_string()
+                } else {
+                    format!("voice {value} — p to hear it")
                 });
             }
             other => self.error(format!("unknown setting: {other}")),

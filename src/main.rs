@@ -4,6 +4,7 @@ mod app;
 mod complete;
 mod model;
 mod search;
+mod speech;
 mod store;
 mod textinput;
 mod ui;

@@ -28,6 +28,7 @@ BROWSING
   u / Ctrl-r     undo / redo a change      x           suspend / unsuspend
   m              cycle the STATUS column   :marked     show only flagged
   z              hide / show meanings      space       check the one word
+  p              say the word out loud     :set voice=NAME     pick its voice
 
   The selected word is shown in the `card` pane below the list, where the
   terminal is tall enough. `…` in its border means there is more than fits.
@@ -42,6 +43,7 @@ READING A WORD
   J / K          next / previous word      Tab         next word too
   i / e          edit it                   m / x       status / suspend
   q / h          back to the list          n / N       next / previous match
+  p              say the word out loud
 
 PRACTISING FROM THE LIST
   z covers every meaning in the browser — the DEFINITION column and the card
@@ -67,6 +69,7 @@ REVIEWING
   m              cycle this word's status  e           edit this card
   x              suspend it                S           bury until later
   j k            scroll a long answer      Ctrl-d/u    half a card at a time
+  p              say the word out loud     (after the reveal, on a reverse card)
   q              end the session
 
   The bar counts cards seen off, not answers given: a card you answer Again
@@ -148,6 +151,7 @@ COMMANDS
   :set new=20    new cards per day         :forget     reset this deck's schedule
   :set grading=binary|sm2                  :status NAME    set a word's status
   :set reverse=on|off                      ask for the word from its meaning
+  :set voice=NAME                          the voice p speaks this deck in
   :study marked  drill one status          :marked NAME    browse one status
   :study more [N]                          N extra new cards, today only
   :restore       list kept copies          :restore N      put one back

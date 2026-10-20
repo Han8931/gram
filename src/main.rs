@@ -66,6 +66,7 @@ fn run_tui() -> Result<()> {
     let db = store::load_from(&path)?;
     let mut app = App::new(db, path);
     app.refresh_rows();
+    std::thread::spawn(speech::warm_up);
     ratatui::run(|terminal| event_loop(terminal, &mut app))
 }
 

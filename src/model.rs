@@ -238,6 +238,17 @@ pub struct Card {
 }
 
 impl Card {
+    /// Take on everything answering `other` changed about its schedule.
+    pub fn copy_schedule(&mut self, other: &Card) {
+        self.ease = other.ease;
+        self.interval = other.interval;
+        self.reps = other.reps;
+        self.lapses = other.lapses;
+        self.state = other.state;
+        self.due = other.due;
+        self.last_reviewed = other.last_reviewed;
+    }
+
     pub fn new(id: u64, term: String, definition: String, today: NaiveDate) -> Self {
         Self {
             id,
@@ -533,6 +544,20 @@ pub struct Db {
 }
 
 impl Db {
+    /// Everything but the review log, for an undo snapshot. Answers are not
+    /// on the change history, so a snapshot has no use for the log — and at
+    /// its cap the log is most of the collection's size, taken again for
+    /// every step.
+    pub fn without_log(&self) -> Db {
+        Db {
+            decks: self.decks.clone(),
+            grading: self.grading,
+            log: Vec::new(),
+            next_card_id: self.next_card_id,
+            next_deck_id: self.next_deck_id,
+        }
+    }
+
     pub fn next_card_id(&mut self) -> u64 {
         self.next_card_id += 1;
         self.next_card_id

@@ -363,6 +363,12 @@ answer, with the card's schedule and its place in the queue — because the
 session queue is not part of the collection and a snapshot could not restore
 it. Everything else is on the change history.
 
+Answers themselves never are. Undoing a change you made before a session
+leaves the session's answers exactly as they were — schedules, the review
+log, the day's new cards, and any ★ an *I don't know* set — so `u` after
+studying takes back your edit, not your work. Suspending a card mid-review
+with `x` is a change like any other, and `u` afterwards can take it back.
+
 The history lives in the running program and is not written to your collection,
 so quitting ends it: **a change you have saved and quit on is not undoable by
 `u`.** What covers you there is a conflict copy and `:restore`, below — and

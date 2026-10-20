@@ -94,7 +94,9 @@ UNDO
   what protects you there is `:restore`.
 
   While reviewing, u means the finer thing it always did: take back my last
-  answer, queue and all. The change history covers everything else.
+  answer, queue and all. The change history covers everything else — and
+  never answers: undoing an edit made before a session leaves the session's
+  answers exactly as they were.
 
 WORD STATUS
   Every word carries a status of your own, shown in the browser's STATUS

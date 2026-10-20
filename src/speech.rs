@@ -84,6 +84,15 @@ fn on_path(name: &str) -> bool {
         .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(name).is_file()))
 }
 
+/// Read the voice listing ahead of the first `p`. Listing them takes `say`
+/// about half a second, and the first press would otherwise freeze the
+/// screen for it. Run on a thread of its own at startup.
+pub fn warm_up() {
+    if program() == Some("say") {
+        say_voices();
+    }
+}
+
 /// `say -v '?'`, read once: one voice per line, `Name  locale  # sample`.
 fn say_voices() -> &'static [(String, String)] {
     static VOICES: OnceLock<Vec<(String, String)>> = OnceLock::new();

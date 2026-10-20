@@ -152,6 +152,8 @@ impl App {
             self.db.log.drain(..excess);
         }
 
+        self.carry_answer(deck_id, &snapshot);
+
         let session = self.session.as_mut().expect("session checked above");
         session.answered += 1;
         let was_retrying = session.retrying.contains(&card_id);
@@ -227,6 +229,11 @@ impl App {
             return;
         };
         let card_id = last.card.id;
+        let answered = self
+            .db
+            .deck_by_id(last.deck)
+            .and_then(|d| d.card(card_id))
+            .cloned();
 
         if let Some(deck) = self.db.deck_by_id_mut(last.deck) {
             if last.spent_new {
@@ -235,6 +242,9 @@ impl App {
             if let Some(card) = deck.card_mut(card_id) {
                 *card = last.card;
             }
+        }
+        if let Some(answered) = answered {
+            self.carry_answer(last.deck, &answered);
         }
         // Drop the log entry this answer produced.
         if self
@@ -346,6 +356,16 @@ impl App {
                 session.completed += 1;
                 let deck_id = session.deck;
                 self.card_scroll = 0;
+                // On the change history, like suspending from the browser,
+                // so `u` after the session can take it back.
+                if let Some(term) = self
+                    .db
+                    .deck_by_id(deck_id)
+                    .and_then(|d| d.card(card_id))
+                    .map(|c| c.term.clone())
+                {
+                    self.checkpoint(format!("suspending {term}"));
+                }
                 if let Some(card) = self
                     .db
                     .deck_by_id_mut(deck_id)

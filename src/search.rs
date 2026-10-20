@@ -179,12 +179,23 @@ pub fn fold(text: &str) -> String {
         .flat_map(char::to_lowercase)
         .filter_map(|ch| {
             // A combining accent typed on its own goes with nothing.
-            if ('\u{300}'..='\u{36f}').contains(&ch) {
+            if is_combining(ch) {
                 return None;
             }
             Some(plain(ch))
         })
         .collect()
+}
+
+/// The blocks of combining marks: the common diacritics, and the rarer
+/// extended, supplementary, symbol and half-mark ones.
+fn is_combining(ch: char) -> bool {
+    matches!(ch,
+        '\u{300}'..='\u{36f}'
+        | '\u{1ab0}'..='\u{1aff}'
+        | '\u{1dc0}'..='\u{1dff}'
+        | '\u{20d0}'..='\u{20ff}'
+        | '\u{fe20}'..='\u{fe2f}')
 }
 
 fn plain(ch: char) -> char {
@@ -273,6 +284,9 @@ mod tests {
     fn a_short_query_is_not_guessed_at() {
         let card = card("Abash", "", "to embarrass");
         assert!(score("abz", &card).is_none(), "three letters, no fuzz");
+        // Two characters is two letters: 你号 is not offered for 你好.
+        let hello = super::tests::card("你好", "nǐ hǎo", "hello");
+        assert!(score("你号", &hello).is_none());
         assert!(score("zzzzzz", &card).is_none());
     }
 
@@ -295,6 +309,7 @@ mod tests {
         assert_eq!(score("你", &hello).map(|s| s.tier), Some(PREFIX));
         assert_eq!(fold("Café"), "cafe");
         assert_eq!(fold("e\u{301}"), "e", "a combining accent folds away too");
+        assert_eq!(fold("e\u{1dc4}"), "e", "and one from the supplement");
     }
 
     #[test]

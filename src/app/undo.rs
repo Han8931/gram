@@ -19,7 +19,7 @@ impl App {
     /// The here and now, ready to be pushed onto either stack.
     pub(super) fn step(&self, label: String) -> Step {
         Step {
-            db: self.db.clone(),
+            db: self.db.without_log(),
             label,
             screen: self.screen,
             deck: self.browse_deck,
@@ -75,7 +75,11 @@ impl App {
 
     /// Put a recorded state back on screen, cursor included.
     pub(super) fn restore_step(&mut self, step: Step) {
+        // The log is the one part a snapshot leaves out: it records answers,
+        // which undo never takes back.
+        let log = std::mem::take(&mut self.db.log);
         self.db = step.db;
+        self.db.log = log;
         self.browse_deck = step.deck;
         self.browse_sel = step.row;
 
@@ -97,6 +101,37 @@ impl App {
         self.peek = false;
         self.refresh_rows();
         self.clamp_decks_sel();
+    }
+
+    /// Write an answer — or the taking back of one — into every snapshot.
+    /// Answers are not on the change history, so `u` must never undo them,
+    /// but each snapshot holds the whole collection: without this, undoing a
+    /// status set before a session would quietly take the session back with
+    /// it. `before` is the card as it was ahead of the answer; the status is
+    /// carried only if the answer itself changed it, so a status you set by
+    /// hand stays undoable.
+    pub(super) fn carry_answer(&mut self, deck_id: u64, before: &Card) {
+        let Some(deck) = self.db.deck_by_id(deck_id) else {
+            return;
+        };
+        let Some(after) = deck.card(before.id).cloned() else {
+            return;
+        };
+        let (intro_date, intro_count) = (deck.intro_date, deck.intro_count);
+        let status_changed = before.status != after.status;
+        for step in self.undo.iter_mut().chain(self.redo.iter_mut()) {
+            let Some(deck) = step.db.deck_by_id_mut(deck_id) else {
+                continue;
+            };
+            deck.intro_date = intro_date;
+            deck.intro_count = intro_count;
+            if let Some(card) = deck.card_mut(after.id) {
+                card.copy_schedule(&after);
+                if status_changed {
+                    card.status = after.status;
+                }
+            }
+        }
     }
 
     pub(super) fn clamp_decks_sel(&mut self) {

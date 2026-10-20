@@ -56,7 +56,9 @@ const MARK: Color = Color::Indexed(221);
 const WARN: Color = Color::Indexed(210);
 /// Text drawn on a coloured badge.
 const ON_BADGE: Color = Color::Indexed(234);
-/// Selected row, and the header strip above a table.
+/// Selected row, and the header strip above a table. `drop_colour` tells a
+/// badge from a table header by comparing against HEAD_BG, so a header strip
+/// drawn in any other background would turn into reverse video under NO_COLOR.
 const SEL_BG: Color = Color::Indexed(237);
 const HEAD_BG: Color = Color::Indexed(235);
 
@@ -135,9 +137,17 @@ fn draw(frame: &mut Frame, app: &mut App) {
 
     render_header(frame, app, header);
 
+    // What `/` has found, worked out once a frame: the list picks the matches
+    // out and the command line counts them, and both want the same answer.
+    let found = if app.screen == Screen::Browse {
+        app.search_matches()
+    } else {
+        Vec::new()
+    };
+
     match app.screen {
         Screen::Decks => render_decks(frame, app, body),
-        Screen::Browse => render_browse(frame, app, body),
+        Screen::Browse => render_browse(frame, app, body, &found),
         Screen::Review => render_review(frame, app, body),
         Screen::Stats => render_stats(frame, app, body),
         Screen::Help => render_help(frame, app, body),
@@ -151,7 +161,7 @@ fn draw(frame: &mut Frame, app: &mut App) {
         render_confirm(frame, app, body);
     }
 
-    render_status(frame, app, status);
+    render_status(frame, app, status, &found);
 
     // Tab's candidate list sits directly above the command line, Vim's
     // wildmenu, and goes away with the completion that produced it.
@@ -328,13 +338,13 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-fn render_status(frame: &mut Frame, app: &App, area: Rect) {
+fn render_status(frame: &mut Frame, app: &App, area: Rect, found: &[usize]) {
     // In `:`, `/` and `f` the status line becomes the command line, and the
     // search and filter say how many they have found as you type.
     if matches!(app.mode, Mode::Command | Mode::Search | Mode::Filter) {
         let (prefix, found) = match app.mode {
             Mode::Command => (":", None),
-            Mode::Search => ("/", Some(app.search_matches().len())),
+            Mode::Search => ("/", Some(found.len())),
             _ => ("filter ", Some(app.rows.len())),
         };
         let tally = match found {

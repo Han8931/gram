@@ -1879,3 +1879,110 @@ fn digits_do_not_grade_before_the_answer_is_shown() {
     assert_eq!(app.session.as_ref().unwrap().answered, 0);
     assert!(app.session.as_ref().unwrap().revealed);
 }
+
+/// Answer the next `count` cards in the session "I know this".
+fn know(app: &mut App, count: usize) {
+    for _ in 0..count {
+        app.on_key(key(' ')).unwrap();
+        app.on_key(key('y')).unwrap();
+    }
+}
+
+fn reviewed(app: &App) -> usize {
+    app.db.decks[0].cards.iter().filter(|c| c.reps > 0).count()
+}
+
+#[test]
+fn undoing_a_change_never_takes_back_the_answers_since() {
+    let mut app = app_with_cards(5);
+    app.enter_browse(DECK);
+    app.on_key(key('m')).unwrap();
+    assert_eq!(app.db.decks[0].cards[0].status, Study::Review);
+    app.back();
+    app.start_session(DECK, Scope::Due);
+    know(&mut app, 3);
+    app.on_key(key('q')).unwrap();
+
+    app.on_key(key('u')).unwrap();
+    assert_eq!(
+        app.db.decks[0].cards[0].status,
+        Study::None,
+        "the status change is undone"
+    );
+    assert_eq!(reviewed(&app), 3, "and the three answers stay answered");
+    assert_eq!(app.db.log.len(), 3, "and stay in the log");
+    assert_eq!(
+        app.db.decks[0].new_allowance(app.today),
+        app.db.decks[0].new_per_day - 3,
+        "the day's new cards stay spent"
+    );
+
+    // Redo puts the status back, still without disturbing the answers.
+    app.on_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL))
+        .unwrap();
+    assert_eq!(app.db.decks[0].cards[0].status, Study::Review);
+    assert_eq!(reviewed(&app), 3);
+}
+
+#[test]
+fn a_mark_the_answer_made_survives_undo_but_yours_does_not() {
+    let mut app = app_with_cards(2);
+    app.db.grading = Grading::Binary;
+    app.enter_browse(DECK);
+    app.run_command("set new=5"); // a change to undo later
+    app.back();
+    app.start_session(DECK, Scope::Due);
+    let missed = app.session.as_ref().and_then(|s| s.current()).unwrap();
+    app.on_key(key(' ')).unwrap();
+    app.on_key(key('n')).unwrap(); // marks it ★
+    app.on_key(key('q')).unwrap();
+
+    app.on_key(key('u')).unwrap();
+    let card = app.db.decks[0].card(missed).unwrap();
+    assert_eq!(
+        card.status,
+        Study::Marked,
+        "the miss's ★ is part of the answer"
+    );
+    assert_eq!(card.lapses, 0, "a first miss is not a lapse");
+    assert_eq!(card.state, CardState::Learning);
+}
+
+#[test]
+fn taking_an_answer_back_reaches_the_snapshots_too() {
+    let mut app = app_with_cards(3);
+    app.run_command("set new=5");
+    app.start_session(DECK, Scope::Due);
+    know(&mut app, 1);
+    app.on_key(key('u')).unwrap(); // the answer, inside the session
+    app.on_key(key('q')).unwrap();
+    app.on_key(key('u')).unwrap(); // then the setting, from the history
+    assert_eq!(reviewed(&app), 0, "nothing answered, before or after");
+    assert!(app.db.log.is_empty());
+}
+
+#[test]
+fn suspending_in_review_can_be_undone_afterwards() {
+    let mut app = app_with_cards(3);
+    app.start_session(DECK, Scope::Due);
+    app.on_key(key('x')).unwrap();
+    app.on_key(key('q')).unwrap();
+    assert_eq!(
+        app.db.decks[0].cards.iter().filter(|c| c.suspended).count(),
+        1
+    );
+    app.on_key(key('u')).unwrap();
+    assert!(app.db.decks[0].cards.iter().all(|c| !c.suspended));
+}
+
+#[test]
+fn snapshots_leave_the_review_log_out() {
+    let mut app = app_with_cards(2);
+    app.start_session(DECK, Scope::Due);
+    know(&mut app, 2);
+    assert_eq!(app.db.log.len(), 2);
+    app.run_command("set new=5");
+    assert!(app.undo.last().is_some_and(|step| step.db.log.is_empty()));
+    app.on_key(key('u')).unwrap();
+    assert_eq!(app.db.log.len(), 2, "undo keeps the log it found");
+}

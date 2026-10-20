@@ -20,7 +20,7 @@ pub(super) fn preview_split(area: Rect) -> (Rect, Option<Rect>) {
     }
 }
 
-pub(super) fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
+pub(super) fn render_browse(frame: &mut Frame, app: &mut App, area: Rect, found: &[usize]) {
     let Some(deck) = app.db.deck_by_id(app.browse_deck) else {
         frame.render_widget(Paragraph::new("no deck").block(panel("browse")), area);
         return;
@@ -88,7 +88,7 @@ pub(super) fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
     };
     let today = app.today;
     // What `/` found, picked out in the list it left whole.
-    let found: std::collections::HashSet<usize> = app.search_matches().into_iter().collect();
+    let found: std::collections::HashSet<usize> = found.iter().copied().collect();
 
     let items: Vec<ListItem> = app
         .rows

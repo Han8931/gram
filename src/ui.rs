@@ -501,6 +501,11 @@ fn render_decks(frame: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     Span::raw("")
                 },
+                if deck.reverse {
+                    Span::styled("  ⇄ reverse", Style::default().fg(ACCENT))
+                } else {
+                    Span::raw("")
+                },
             ]))
         })
         .collect();
@@ -920,17 +925,17 @@ fn card_body(card: &Card, width: usize, labelled: bool) -> Vec<Line<'static>> {
 fn render_review(frame: &mut Frame, app: &mut App, area: Rect) {
     // Taken by value so the card's scroll offset can be clamped against the
     // lines it actually produced, further down.
-    let Some((revealed, card)) = ({
+    let Some((revealed, reverse, card)) = ({
         let Some(session) = app.session.as_ref() else {
             return;
         };
         let Some(card_id) = session.current() else {
             return;
         };
-        app.db
-            .deck_by_id(session.deck)
-            .and_then(|d| d.card(card_id))
-            .map(|card| (session.revealed, card.clone()))
+        app.db.deck_by_id(session.deck).and_then(|deck| {
+            let card = deck.card(card_id)?.clone();
+            Some((session.revealed, deck.reverse, card))
+        })
     }) else {
         return;
     };
@@ -951,6 +956,8 @@ fn render_review(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let lines = if revealed {
         full_card(card, card_text_width(card_area))
+    } else if reverse {
+        reverse_prompt(card, card_text_width(card_area))
     } else {
         vec![
             Line::from(""),
@@ -966,7 +973,11 @@ fn render_review(frame: &mut Frame, app: &mut App, area: Rect) {
         frame,
         app,
         lines,
-        if revealed { "answer" } else { "recall" },
+        match (revealed, reverse) {
+            (true, _) => "answer",
+            (false, true) => "recall the word",
+            (false, false) => "recall",
+        },
         card_area,
     );
 
@@ -1010,6 +1021,32 @@ fn full_card(card: &Card, width: usize) -> Vec<Line<'static>> {
     lines.push(Line::from(Span::styled(
         scheduling_summary(card),
         Style::default().fg(DIM),
+    )));
+    lines
+}
+
+/// The question side of a reverse card: the meaning, with nothing that spells
+/// out the word. The examples stay hidden — they use the word — and so do the
+/// reading and the look-alikes; the part of speech is a fair hint.
+fn reverse_prompt(card: &Card, width: usize) -> Vec<Line<'static>> {
+    let mut head = vec![Span::styled("?", Style::default().fg(ACCENT).bold())];
+    if !card.pos.is_empty() {
+        head.push(Span::styled(
+            format!("  {}", card.pos),
+            Style::default().fg(DIM).italic(),
+        ));
+    }
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(head),
+        rule(width),
+        Line::from(""),
+    ];
+    lines.extend(wrap_prose(&Prose::definition(), &card.definition, width));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "  which word is this? space to reveal",
+        Style::default().fg(DIM).italic(),
     )));
     lines
 }
@@ -1917,6 +1954,7 @@ COMMANDS
   :export FILE                             export this deck as CSV
   :set new=20    new cards per day         :forget     reset this deck's schedule
   :set grading=binary|sm2                  :status NAME    set a word's status
+  :set reverse=on|off                      ask for the word from its meaning
   :study marked  drill one status          :marked NAME    browse one status
   :study more [N]                          N extra new cards, today only
   :restore       list kept copies          :restore N      put one back

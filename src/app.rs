@@ -2525,7 +2525,7 @@ impl App {
 
     fn cmd_set(&mut self, rest: &str) {
         let Some((key, value)) = rest.split_once('=') else {
-            self.error("usage: :set new=<n> | :set grading=binary|sm2");
+            self.error("usage: :set new=<n> | :set grading=binary|sm2 | :set reverse=on|off");
             return;
         };
         let value = value.trim();
@@ -2561,6 +2561,30 @@ impl App {
                 }
                 self.dirty = true;
                 self.info(format!("{amount} new cards per day"));
+            }
+            "reverse" => {
+                let reverse = match value {
+                    "on" | "yes" | "true" | "1" => true,
+                    "off" | "no" | "false" | "0" => false,
+                    _ => {
+                        self.error(format!("reverse must be on or off, not {value:?}"));
+                        return;
+                    }
+                };
+                let Some(deck_id) = self.active_deck() else {
+                    self.error("no deck selected");
+                    return;
+                };
+                self.checkpoint("the card direction");
+                if let Some(deck) = self.db.deck_by_id_mut(deck_id) {
+                    deck.reverse = reverse;
+                }
+                self.dirty = true;
+                self.info(if reverse {
+                    "reverse — recall the word from its meaning"
+                } else {
+                    "forward — recall the meaning from the word"
+                });
             }
             other => self.error(format!("unknown setting: {other}")),
         }
@@ -4073,6 +4097,65 @@ mod tests {
         app.on_key(key('g')).unwrap();
         assert_eq!(app.card_scroll, 0, "gg to the top");
         assert_eq!(app.screen, Screen::Card);
+    }
+
+    /// Draw one frame and hand back what is on the screen, row by row.
+    fn screen_text(app: &mut App, width: u16, height: u16) -> String {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| crate::ui::render(frame, app))
+            .expect("draw");
+        let buffer = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn set_reverse_flips_the_deck_and_can_be_undone() {
+        let mut app = app_with_cards(1);
+        app.run_command("set reverse=on");
+        assert!(app.db.decks[0].reverse);
+        app.run_command("set reverse=sideways");
+        assert!(app.status.error, "only on or off");
+        assert!(app.db.decks[0].reverse, "and a bad value changes nothing");
+        app.on_key(key('u')).unwrap();
+        assert!(!app.db.decks[0].reverse);
+    }
+
+    #[test]
+    fn a_reverse_card_asks_for_the_word_without_showing_it() {
+        let mut app = app_with_words(&["abash"]);
+        {
+            let card = &mut app.db.decks[0].cards[0];
+            card.pron = "uh BASH".into();
+            card.example = "Meredith felt *abashed* by it.".into();
+        }
+        app.db.decks[0].reverse = true;
+        app.start_session(DECK, Scope::Due);
+
+        let question = screen_text(&mut app, 100, 30);
+        assert!(question.contains("the meaning of abash"), "{question}");
+        for giveaway in ["abash", "Meredith", "uh BASH"] {
+            let shown = question.replace("the meaning of abash", "");
+            assert!(
+                !shown.contains(giveaway),
+                "{giveaway:?} on the question side:\n{question}"
+            );
+        }
+
+        app.on_key(key(' ')).unwrap();
+        let answer = screen_text(&mut app, 100, 30);
+        assert!(
+            answer.contains("abash") && answer.contains("Meredith"),
+            "{answer}"
+        );
     }
 
     #[test]

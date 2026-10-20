@@ -143,6 +143,19 @@ just a faster decision. `:set grading=sm2` brings back the full Again / Hard /
 Good / Easy row; `1`–`4` keep working in either mode when you want the finer
 grades.
 
+### Reverse cards
+
+`:set reverse=on` turns a deck's cards around: the question side shows the
+definition and part of speech, and you recall the word. The term, its
+reading, the examples and the look-alikes all stay hidden until you reveal
+the answer, since each of them gives the word away. For a language deck this
+is production rather than recognition — writing 你好 from *hello* is harder
+than reading it — and it is worth switching on once a deck is familiar.
+
+It is a setting on the deck, shown as `⇄ reverse` in the deck list, and both
+directions share the one schedule: answering a reverse card moves the same
+due date a forward answer would. `:set reverse=off` turns it back.
+
 The bar above the card counts cards seen off, not answers given. A word you
 answer **I don't know** comes back later in the session and shows up as
 `retrying` until you get it right, so the bar never reads 100% with cards still
@@ -261,6 +274,7 @@ towards the schedule, study the deck with `s`, or drill a status with `M`.
 :export FILE            write the current deck out as CSV
 :set new=20             new cards introduced per day (per deck)
 :set grading=binary|sm2 which answer bar to show (collection-wide)
+:set reverse=on|off     ask for the word from its meaning (per deck)
 :forget                 reset this deck's scheduling
 :status NAME            set this word's status (review|marked|test|none)
 :study NAME             drill one status

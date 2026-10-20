@@ -372,6 +372,11 @@ pub struct Deck {
     pub intro_date: Option<NaiveDate>,
     #[serde(default)]
     pub intro_count: u32,
+    /// Ask for the word from its meaning instead of the meaning from the
+    /// word: production rather than recognition, which for a language deck
+    /// is a different skill. Both directions share the one schedule.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reverse: bool,
 }
 
 impl Deck {
@@ -383,6 +388,7 @@ impl Deck {
             new_per_day: default_new_per_day(),
             intro_date: None,
             intro_count: 0,
+            reverse: false,
         }
     }
 
@@ -590,6 +596,17 @@ impl Db {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reverse_is_kept_and_left_out_when_off() {
+        let mut deck = Deck::new(1, "d".into());
+        let json = serde_json::to_string(&deck).unwrap();
+        assert!(!json.contains("reverse"), "older files stay as they were");
+        deck.reverse = true;
+        let json = serde_json::to_string(&deck).unwrap();
+        let back: Deck = serde_json::from_str(&json).unwrap();
+        assert!(back.reverse);
+    }
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()

@@ -25,10 +25,13 @@ const STATUSES: &[&str] = &["marked", "none", "review", "test"];
 const SCOPES: &[&str] = &["due", "flagged", "marked", "more", "review", "test"];
 
 /// Settings for `:set`, written as the `key=` they are typed with.
-const SETTINGS: &[&str] = &["grading=", "new="];
+const SETTINGS: &[&str] = &["grading=", "new=", "reverse="];
 
 /// Values for `:set grading=`.
 const GRADINGS: &[&str] = &["binary", "sm2"];
+
+/// Values for `:set reverse=`.
+const SWITCHES: &[&str] = &["off", "on"];
 
 /// What Tab offers for `line`: the character index where the word being
 /// completed starts, and everything that could finish it.
@@ -93,6 +96,10 @@ fn settings(token: &str) -> Vec<String> {
         Some(("grading" | "mode", value)) => prefixed(GRADINGS, value)
             .into_iter()
             .map(|grading| format!("grading={grading}"))
+            .collect(),
+        Some(("reverse", value)) => prefixed(SWITCHES, value)
+            .into_iter()
+            .map(|switch| format!("reverse={switch}"))
             .collect(),
         // `new=` takes a number, and `:set foo=` is not a setting at all.
         Some(_) => Vec::new(),
@@ -187,6 +194,8 @@ mod tests {
             "both modes"
         );
         assert!(names("set new=2").is_empty(), "a number, not a choice");
+        assert_eq!(names("set r"), vec!["reverse="]);
+        assert_eq!(names("set reverse=o"), vec!["reverse=off", "reverse=on"]);
     }
 
     #[test]

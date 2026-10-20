@@ -9,6 +9,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::complete;
 use crate::model::{Card, CardState, Db, Deck, Grade, Grading, MAX_LOG, ReviewLog, Study};
+use crate::search::{self, Query};
 use crate::store;
 use crate::textinput::TextInput;
 use crate::util::Rng;
@@ -26,6 +27,8 @@ pub enum Screen {
     Review,
     Stats,
     Help,
+    /// One word from the browser, laid out in full to be read.
+    Card,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,7 +36,10 @@ pub enum Mode {
     Normal,
     Insert,
     Command,
+    /// `/` — move the cursor to the best match as you type.
     Search,
+    /// `f` — narrow the list to the matches as you type.
+    Filter,
 }
 
 impl Mode {
@@ -43,6 +49,7 @@ impl Mode {
             Self::Insert => "INSERT",
             Self::Command => "COMMAND",
             Self::Search => "SEARCH",
+            Self::Filter => "FILTER",
         }
     }
 }
@@ -307,6 +314,12 @@ pub struct App {
     /// Indices into the browsed deck's cards, after filtering.
     pub rows: Vec<usize>,
     pub filter: String,
+    /// The last `/` search: what `n` and `N` step through, and what the
+    /// browser picks out. The list itself is left whole.
+    pub search: String,
+    /// Where the cursor, the filter and the search were when `/` or `f`
+    /// opened, so `Esc` can put them back.
+    line_origin: Option<(usize, String)>,
     /// `:marked` — restrict the browser to words carrying a status.
     pub status_filter: StatusFilter,
     /// `z` — cover every meaning in the browser, so the word list reads as a
@@ -369,6 +382,8 @@ impl App {
             browse_off: 0,
             rows: Vec::new(),
             filter: String::new(),
+            search: String::new(),
+            line_origin: None,
             status_filter: StatusFilter::default(),
             hide_meanings: false,
             peek: false,
@@ -427,7 +442,7 @@ impl App {
     /// Id of the deck the current screen acts on.
     pub fn active_deck(&self) -> Option<u64> {
         let id = match self.screen {
-            Screen::Browse => self.browse_deck,
+            Screen::Browse | Screen::Card => self.browse_deck,
             Screen::Review => self.session.as_ref()?.deck,
             _ => self.db.decks.get(self.decks_sel)?.id,
         };
@@ -440,29 +455,61 @@ impl App {
         Some((self.browse_deck, index))
     }
 
-    /// Recompute the filtered row list for the browser.
+    /// Recompute the filtered row list for the browser. A filter lists its
+    /// matches best first — the word you meant ahead of the sentence that
+    /// mentions it — and, with nothing typed, the deck keeps its own order.
     pub fn refresh_rows(&mut self) {
-        let needle = self.filter.to_lowercase();
+        let query = Query::new(&self.filter);
         self.rows = match self.db.deck_by_id(self.browse_deck) {
             None => Vec::new(),
-            Some(deck) => deck
-                .cards
-                .iter()
-                .enumerate()
-                .filter(|(_, card)| self.status_filter.matches(card))
-                .filter(|(_, card)| {
-                    needle.is_empty()
-                        || card.term.to_lowercase().contains(&needle)
-                        || card.definition.to_lowercase().contains(&needle)
-                        || card.notes.to_lowercase().contains(&needle)
-                        || card.confusing.to_lowercase().contains(&needle)
-                })
-                .map(|(i, _)| i)
-                .collect(),
+            Some(deck) => {
+                let shown = deck
+                    .cards
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, card)| self.status_filter.matches(card));
+                if query.is_empty() {
+                    shown.map(|(i, _)| i).collect()
+                } else {
+                    search::rank(
+                        shown
+                            .filter_map(|(i, card)| query.score(card).map(|score| (score, i)))
+                            .collect(),
+                    )
+                }
+            }
         };
         if self.browse_sel >= self.rows.len() {
             self.browse_sel = self.rows.len().saturating_sub(1);
         }
+    }
+
+    /// What the browser is searching for: the line being typed while `/` is
+    /// open, the last search after it.
+    pub fn search_query(&self) -> &str {
+        if self.mode == Mode::Search {
+            self.line.value()
+        } else {
+            &self.search
+        }
+    }
+
+    /// Rows matching the search, as positions in the list, best match first.
+    pub fn search_matches(&self) -> Vec<usize> {
+        let query = Query::new(self.search_query());
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let Some(deck) = self.db.deck_by_id(self.browse_deck) else {
+            return Vec::new();
+        };
+        search::rank(
+            self.rows
+                .iter()
+                .enumerate()
+                .filter_map(|(row, &i)| Some((query.score(deck.cards.get(i)?)?, row)))
+                .collect(),
+        )
     }
 
     // -- study sessions ---------------------------------------------------
@@ -1008,7 +1055,7 @@ impl App {
         // pointed at a deck that is not there shows "no deck" and traps you.
         let deck_gone = self.db.deck_by_id(self.browse_deck).is_none();
         self.screen = match step.screen {
-            Screen::Browse if deck_gone => Screen::Decks,
+            Screen::Browse | Screen::Card if deck_gone => Screen::Decks,
             // A session's queue holds card ids that a restored collection need
             // not contain, so undo never drops you back into one.
             Screen::Review => Screen::Decks,
@@ -1036,7 +1083,7 @@ impl App {
                 .session
                 .as_ref()
                 .and_then(|s| s.current().map(|id| (s.deck, id))),
-            Screen::Browse => self.selected_card().and_then(|(deck, index)| {
+            Screen::Browse | Screen::Card => self.selected_card().and_then(|(deck, index)| {
                 let card = self.db.deck_by_id(deck)?.cards.get(index)?;
                 Some((deck, card.id))
             }),
@@ -1183,18 +1230,109 @@ impl App {
         *self.cursor() = index.min(len - 1);
     }
 
-    /// `n` / `N` — jump to the next row matching the filter.
+    /// `n` / `N` — on to the next match of the last search, best first, the
+    /// way Vim steps through a pattern. With no search, but a filter, every
+    /// row is a match and they are stepped through in order.
     fn jump_match(&mut self, forward: bool) {
-        if self.filter.is_empty() || self.rows.is_empty() {
+        if self.rows.is_empty() {
             return;
         }
         self.peek = false;
-        let len = self.rows.len();
-        self.browse_sel = if forward {
-            (self.browse_sel + 1) % len
-        } else {
-            (self.browse_sel + len - 1) % len
+        self.card_scroll = 0;
+        if self.search.is_empty() {
+            if self.filter.is_empty() {
+                self.error("no previous search — / to search");
+                return;
+            }
+            let len = self.rows.len();
+            self.browse_sel = if forward {
+                (self.browse_sel + 1) % len
+            } else {
+                (self.browse_sel + len - 1) % len
+            };
+            return;
+        }
+        let matches = self.search_matches();
+        if matches.is_empty() {
+            self.error(format!("no match for {:?}", self.search));
+            return;
+        }
+        let len = matches.len();
+        let next = match matches.iter().position(|&row| row == self.browse_sel) {
+            Some(at) if forward => (at + 1) % len,
+            Some(at) => (at + len - 1) % len,
+            None if forward => 0,
+            None => len - 1,
         };
+        self.browse_sel = matches[next];
+        self.info(format!("match {} of {len} for {:?}", next + 1, self.search));
+    }
+
+    /// `/` and `f` both open the line on the browser. Remember how things
+    /// stood, so `Esc` can leave them that way.
+    fn open_line(&mut self, mode: Mode) {
+        self.line_origin = Some((self.browse_sel, self.filter.clone()));
+        self.line.clear();
+        self.mode = mode;
+    }
+
+    /// Re-run a half-typed `/` or `f` after every key, so the list answers as
+    /// you type instead of after Enter.
+    fn follow_line(&mut self) {
+        match self.mode {
+            Mode::Search => {
+                let origin = self.line_origin.as_ref().map_or(0, |(row, _)| *row);
+                self.peek = false;
+                self.browse_sel = self.search_matches().first().copied().unwrap_or(origin);
+            }
+            Mode::Filter => {
+                self.filter = self.line.value().to_string();
+                self.browse_sel = 0;
+                self.peek = false;
+                self.refresh_rows();
+            }
+            _ => {}
+        }
+    }
+
+    /// `Esc` out of `/` or `f`: the cursor and the filter go back to where
+    /// they were before it opened.
+    fn cancel_line(&mut self) {
+        if let Some((row, filter)) = self.line_origin.take()
+            && matches!(self.mode, Mode::Search | Mode::Filter)
+        {
+            if self.filter != filter {
+                self.filter = filter;
+                self.refresh_rows();
+            }
+            self.browse_sel = row.min(self.rows.len().saturating_sub(1));
+        }
+    }
+
+    /// Enter on the browser — open the word to read it, not to edit it.
+    fn open_card_view(&mut self) {
+        if self.selected_card().is_none() {
+            self.error("no card selected");
+            return;
+        }
+        self.screen = Screen::Card;
+        self.card_scroll = 0;
+        self.peek = false;
+    }
+
+    /// `J` / `K` in the word view: the next word down the list, or up it.
+    fn step_card(&mut self, delta: isize) {
+        let len = self.rows.len();
+        if len == 0 {
+            return;
+        }
+        let next = (self.browse_sel as isize + delta).clamp(0, len as isize - 1) as usize;
+        if next == self.browse_sel {
+            self.info(if delta > 0 { "last word" } else { "first word" });
+            return;
+        }
+        self.browse_sel = next;
+        self.card_scroll = 0;
     }
 
     /// `z` — cover the meanings, or uncover them if they are already covered.
@@ -1246,6 +1384,11 @@ impl App {
             Screen::Browse => {
                 self.screen = Screen::Decks;
                 self.filter.clear();
+                self.search.clear();
+            }
+            Screen::Card => {
+                self.screen = Screen::Browse;
+                self.card_scroll = 0;
             }
             Screen::Decks => self.request_quit(),
         }
@@ -1295,7 +1438,7 @@ impl App {
             return Ok(());
         }
         match self.mode {
-            Mode::Command | Mode::Search => self.key_line(key),
+            Mode::Command | Mode::Search | Mode::Filter => self.key_line(key),
             _ if self.editor.is_some() => self.key_editor(key),
             _ => self.key_screen(key),
         }
@@ -1306,6 +1449,7 @@ impl App {
         let answer = match key.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => true,
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => false,
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => false,
             _ => return,
         };
         let Some(confirm) = self.confirm.take() else {
@@ -1504,34 +1648,36 @@ impl App {
         }
         self.completion = None;
 
+        let before = self.line.value().len();
         match key.code {
-            KeyCode::Esc => {
-                self.line.clear();
-                // The editor is tracked separately, so leaving the command
-                // line always just means "back to normal mode".
-                self.mode = Mode::Normal;
-            }
+            // Ctrl-C leaves the line the way Esc does, as in Vim.
+            KeyCode::Esc => self.leave_line(),
+            KeyCode::Char('c') if ctrl => self.leave_line(),
             KeyCode::Enter => {
                 let text = self.line.take();
-                let searching = self.mode == Mode::Search;
+                let mode = self.mode;
                 self.mode = Mode::Normal;
-                if searching {
-                    self.filter = text;
-                    self.browse_sel = 0;
-                    self.refresh_rows();
-                    let hits = self.rows.len();
-                    if hits == 0 {
-                        self.error(format!("no cards match {:?}", self.filter));
-                    } else {
-                        self.info(format!("{hits} matches"));
+                self.line_origin = None;
+                match mode {
+                    Mode::Search => self.finish_search(text),
+                    Mode::Filter => {
+                        self.filter = text;
+                        self.refresh_rows();
+                        let hits = self.rows.len();
+                        if self.filter.is_empty() {
+                            self.info("filter cleared");
+                        } else if hits == 0 {
+                            self.error(format!("no cards match {:?}", self.filter));
+                        } else {
+                            self.info(format!("{hits} matching — :noh to show all"));
+                        }
                     }
-                } else {
-                    self.run_command(&text);
+                    _ => self.run_command(&text),
                 }
             }
             KeyCode::Backspace => {
                 if self.line.is_empty() {
-                    self.mode = Mode::Normal;
+                    self.leave_line();
                 } else {
                     self.line.delete_back();
                 }
@@ -1544,6 +1690,51 @@ impl App {
             KeyCode::Char('u') if ctrl => self.line.delete_to_start(),
             KeyCode::Char(ch) if !ctrl => self.line.insert(ch),
             _ => {}
+        }
+        if self.line.value().len() != before {
+            self.follow_line();
+        }
+    }
+
+    fn leave_line(&mut self) {
+        self.cancel_line();
+        self.line.clear();
+        // The editor is tracked separately, so leaving the command line
+        // always just means "back to normal mode".
+        self.mode = Mode::Normal;
+    }
+
+    /// Enter on `/`: the cursor stays on the best match, and `n` / `N` take
+    /// over from there.
+    fn finish_search(&mut self, text: String) {
+        if text.trim().is_empty() {
+            // Vim's bare `/` repeats the last search.
+            self.jump_match(true);
+            return;
+        }
+        self.search = text;
+        let matches = self.search_matches();
+        match matches.first() {
+            None => self.error(format!("no match for {:?}", self.search)),
+            Some(&best) => {
+                self.browse_sel = best;
+                let rows = &self.rows;
+                let fuzzy = Query::new(&self.search);
+                let close = self
+                    .db
+                    .deck_by_id(self.browse_deck)
+                    .and_then(|deck| deck.cards.get(rows[best]))
+                    .and_then(|card| fuzzy.score(card))
+                    .is_some_and(|score| score.is_fuzzy());
+                let total = matches.len();
+                self.info(if close {
+                    format!("no exact match — {total} close spellings, n / N to step through")
+                } else if total == 1 {
+                    "1 match".to_string()
+                } else {
+                    format!("{total} matches, best first — n / N to step through")
+                });
+            }
         }
     }
 
@@ -1634,6 +1825,12 @@ impl App {
 
         if insert {
             match key.code {
+                KeyCode::Char('c') if ctrl => {
+                    self.mode = Mode::Normal;
+                    if let Some(editor) = self.editor.as_mut() {
+                        editor.current_mut().clamp_normal();
+                    }
+                }
                 KeyCode::Esc => {
                     self.mode = Mode::Normal;
                     if let Some(editor) = self.editor.as_mut() {
@@ -1743,6 +1940,15 @@ impl App {
     fn key_screen(&mut self, key: KeyEvent) {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
 
+        // Raw mode turns Ctrl-C into a key like any other. Say what quits
+        // instead, the way Vim does, rather than swallowing it in silence.
+        if ctrl && key.code == KeyCode::Char('c') {
+            self.pending = None;
+            self.count.clear();
+            self.info("type :q to quit, or ZZ to save and quit");
+            return;
+        }
+
         // Numeric prefix, Vim style. `0` is a motion when no count is pending.
         if let KeyCode::Char(ch @ '0'..='9') = key.code {
             let counting = ch != '0' || !self.count.is_empty();
@@ -1756,6 +1962,10 @@ impl App {
         let pending = self.pending.take();
         if let Some('g') = pending {
             match key.code {
+                KeyCode::Char('g') if self.screen == Screen::Card => {
+                    self.count.clear();
+                    self.card_scroll = 0;
+                }
                 KeyCode::Char('g') => {
                     let index = self.take_count().saturating_sub(1);
                     self.goto(index);
@@ -1786,6 +1996,9 @@ impl App {
 
         // Screen-specific keys get first refusal, then the shared bindings.
         if self.screen == Screen::Review && self.key_review(key) {
+            return;
+        }
+        if self.screen == Screen::Card && self.key_card(key) {
             return;
         }
 
@@ -1819,9 +2032,9 @@ impl App {
                 self.mode = Mode::Command;
                 self.line.clear();
             }
-            KeyCode::Char('/') if self.screen == Screen::Browse => {
-                self.mode = Mode::Search;
-                self.line.clear();
+            KeyCode::Char('/') if self.screen == Screen::Browse => self.open_line(Mode::Search),
+            KeyCode::Char('f') if self.screen == Screen::Browse && !ctrl => {
+                self.open_line(Mode::Filter)
             }
             KeyCode::Char('?') => {
                 if self.screen != Screen::Help {
@@ -1830,8 +2043,12 @@ impl App {
                 self.screen = Screen::Help;
                 self.help_scroll = 0;
             }
-            KeyCode::Char('n') if self.screen == Screen::Browse => self.jump_match(true),
-            KeyCode::Char('N') if self.screen == Screen::Browse => self.jump_match(false),
+            KeyCode::Char('n') if matches!(self.screen, Screen::Browse | Screen::Card) => {
+                self.jump_match(true)
+            }
+            KeyCode::Char('N') if matches!(self.screen, Screen::Browse | Screen::Card) => {
+                self.jump_match(false)
+            }
 
             KeyCode::Char('j') | KeyCode::Down => self.scroll(count),
             KeyCode::Char('k') | KeyCode::Up => self.scroll(-count),
@@ -1879,7 +2096,7 @@ impl App {
                         self.enter_browse(deck);
                     }
                 }
-                Screen::Browse => self.open_edit_card(),
+                Screen::Browse => self.open_card_view(),
                 _ => {}
             },
             KeyCode::Char('h') | KeyCode::Left => {
@@ -1902,7 +2119,7 @@ impl App {
             }
             // A long answer scrolls inside the card. The render clamps it to
             // whatever actually overflows.
-            Screen::Review => {
+            Screen::Review | Screen::Card => {
                 self.card_scroll = self.card_scroll.saturating_add_signed(narrow(delta));
             }
             _ => self.move_cursor(delta),
@@ -1935,6 +2152,23 @@ impl App {
             session.revealed = true;
         }
         self.card_scroll = 0;
+    }
+
+    /// Keys of the word view. Returns true when the key was consumed; `j` /
+    /// `k`, `n` / `N` and `q` fall through to the shared bindings.
+    fn key_card(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        match key.code {
+            KeyCode::Char('J') | KeyCode::Tab => self.step_card(1),
+            KeyCode::Char('K') | KeyCode::BackTab => self.step_card(-1),
+            KeyCode::Char('i') | KeyCode::Char('e') | KeyCode::Enter => self.open_edit_card(),
+            KeyCode::Char('m') => self.cycle_status(!ctrl),
+            KeyCode::Char('x') if !ctrl => self.toggle_suspend(),
+            // `gg` and `G` go to the top and bottom of the card, not the deck.
+            KeyCode::Char('G') => self.card_scroll = u16::MAX / 2,
+            _ => return false,
+        }
+        true
     }
 
     /// Review-screen keys. Returns true when the key was consumed.
@@ -2281,6 +2515,7 @@ impl App {
             }
             "nohl" | "nohlsearch" | "noh" => {
                 self.filter.clear();
+                self.search.clear();
                 self.status_filter = StatusFilter::Off;
                 self.refresh_rows();
             }
@@ -3658,21 +3893,203 @@ mod tests {
         assert_eq!(app.browse_sel, 0);
     }
 
-    #[test]
-    fn search_filters_rows() {
-        let mut app = app_with_cards(15);
-        app.enter_browse(DECK);
-        app.on_key(key('/')).unwrap();
-        assert_eq!(app.mode, Mode::Search);
-        for ch in "term1".chars() {
+    /// Type `text` into whatever is listening — unlike `typed`, without
+    /// opening the command line first.
+    fn keys(app: &mut App, text: &str) {
+        for ch in text.chars() {
             app.on_key(key(ch)).unwrap();
         }
-        app.on_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
-            .unwrap();
+    }
 
-        // term1, term10..term14
+    fn press(app: &mut App, code: KeyCode) {
+        app.on_key(KeyEvent::new(code, KeyModifiers::NONE)).unwrap();
+    }
+
+    fn ctrl(app: &mut App, ch: char) {
+        app.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL))
+            .unwrap();
+    }
+
+    /// A browser over real words, for searches that need spelling to mean
+    /// something.
+    fn app_with_words(words: &[&str]) -> App {
+        let mut app = app_with_cards(words.len());
+        for (card, word) in app.db.decks[0].cards.iter_mut().zip(words) {
+            card.term = word.to_string();
+            card.definition = format!("the meaning of {word}");
+        }
+        app.enter_browse(DECK);
+        app
+    }
+
+    /// The term under the browser's cursor.
+    fn selected_term(app: &App) -> String {
+        let (_, index) = app.selected_card().expect("a selected card");
+        app.db.decks[0].cards[index].term.clone()
+    }
+
+    #[test]
+    fn f_filters_rows() {
+        let mut app = app_with_cards(15);
+        app.enter_browse(DECK);
+        app.on_key(key('f')).unwrap();
+        assert_eq!(app.mode, Mode::Filter);
+        keys(&mut app, "term1");
+        // The list narrows as you type, before Enter.
+        assert_eq!(app.rows.len(), 6, "term1, term10..term14");
+        press(&mut app, KeyCode::Enter);
         assert_eq!(app.rows.len(), 6);
         assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn esc_puts_the_filter_back() {
+        let mut app = app_with_cards(15);
+        app.enter_browse(DECK);
+        app.on_key(key('f')).unwrap();
+        keys(&mut app, "term1");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.rows.len(), 15);
+        assert!(app.filter.is_empty());
+    }
+
+    #[test]
+    fn slash_moves_the_cursor_as_you_type() {
+        let mut app = app_with_words(&["abash", "abate", "abdicate", "aberration", "abhor"]);
+        app.on_key(key('/')).unwrap();
+        assert_eq!(app.mode, Mode::Search);
+        keys(&mut app, "abd");
+        assert_eq!(selected_term(&app), "abdicate", "there before Enter");
+        assert_eq!(app.rows.len(), 5, "and the list is left whole");
+        // One slip from abdicate would still find it; two is no match.
+        keys(&mut app, "qq");
+        assert_eq!(app.browse_sel, 0, "no match: back where it started");
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Backspace);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(selected_term(&app), "abdicate");
+        assert_eq!(app.search, "abd");
+    }
+
+    #[test]
+    fn esc_puts_the_cursor_back_where_it_was() {
+        let mut app = app_with_words(&["abash", "abate", "abdicate", "aberration", "abhor"]);
+        app.on_key(key('j')).unwrap();
+        app.on_key(key('/')).unwrap();
+        keys(&mut app, "abh");
+        assert_eq!(selected_term(&app), "abhor");
+        press(&mut app, KeyCode::Esc);
+        assert_eq!(app.browse_sel, 1);
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn a_misspelt_search_still_lands_on_the_word() {
+        let mut app = app_with_words(&["abash", "ubiquitous", "zealot", "obsequious"]);
+        app.on_key(key('/')).unwrap();
+        keys(&mut app, "ubiqitus");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(selected_term(&app), "ubiquitous");
+        assert!(app.status.text.contains("close"), "{}", app.status.text);
+    }
+
+    #[test]
+    fn n_steps_through_the_matches_best_first() {
+        // "abate" is the exact word; the others merely start with it or
+        // mention it, so they come after whatever their place in the deck.
+        let mut app = app_with_words(&["abated", "abash", "abate", "abatement"]);
+        app.on_key(key('/')).unwrap();
+        keys(&mut app, "abate");
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(selected_term(&app), "abate");
+        app.on_key(key('n')).unwrap();
+        assert_eq!(selected_term(&app), "abated");
+        app.on_key(key('n')).unwrap();
+        assert_eq!(selected_term(&app), "abatement");
+        app.on_key(key('n')).unwrap();
+        assert_eq!(selected_term(&app), "abate", "and round again");
+        app.on_key(key('N')).unwrap();
+        assert_eq!(selected_term(&app), "abatement");
+    }
+
+    #[test]
+    fn noh_forgets_the_search() {
+        let mut app = app_with_words(&["abash", "abate"]);
+        app.on_key(key('/')).unwrap();
+        keys(&mut app, "abate");
+        press(&mut app, KeyCode::Enter);
+        assert!(!app.search_matches().is_empty());
+        app.run_command("noh");
+        assert!(app.search_matches().is_empty());
+    }
+
+    #[test]
+    fn enter_opens_the_word_to_read_and_i_edits_it() {
+        let mut app = app_with_words(&["abash", "abate", "abdicate"]);
+        press(&mut app, KeyCode::Enter);
+        assert_eq!(app.screen, Screen::Card);
+        assert!(app.editor.is_none(), "reading, not editing");
+        draw(&mut app, 80, 24);
+
+        app.on_key(key('J')).unwrap();
+        assert_eq!(selected_term(&app), "abate");
+        press(&mut app, KeyCode::Tab);
+        assert_eq!(selected_term(&app), "abdicate");
+        app.on_key(key('J')).unwrap();
+        assert_eq!(selected_term(&app), "abdicate", "the last word stays put");
+        app.on_key(key('K')).unwrap();
+        assert_eq!(selected_term(&app), "abate");
+
+        app.on_key(key('i')).unwrap();
+        assert!(app.editor.is_some());
+        app.on_key(key('q')).unwrap();
+        assert_eq!(app.screen, Screen::Card, "the editor closes back onto it");
+
+        app.on_key(key('q')).unwrap();
+        assert_eq!(app.screen, Screen::Browse);
+        assert_eq!(
+            selected_term(&app),
+            "abate",
+            "where J and K left the cursor"
+        );
+    }
+
+    #[test]
+    fn the_word_view_scrolls_a_long_card() {
+        let mut app = app_with_words(&["abash"]);
+        app.db.decks[0].cards[0].example = (0..40)
+            .map(|i| format!("example sentence number {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        press(&mut app, KeyCode::Enter);
+        draw(&mut app, 80, 24);
+        app.on_key(key('j')).unwrap();
+        app.on_key(key('j')).unwrap();
+        assert_eq!(app.card_scroll, 2, "j scrolls the card, not the list");
+        app.on_key(key('G')).unwrap();
+        draw(&mut app, 80, 24);
+        assert!(app.card_scroll > 2, "G goes to the bottom");
+        app.on_key(key('g')).unwrap();
+        app.on_key(key('g')).unwrap();
+        assert_eq!(app.card_scroll, 0, "gg to the top");
+        assert_eq!(app.screen, Screen::Card);
+    }
+
+    #[test]
+    fn ctrl_c_explains_itself_instead_of_quitting() {
+        let mut app = app_with_cards(3);
+        app.enter_browse(DECK);
+        ctrl(&mut app, 'c');
+        assert!(!app.quit);
+        assert!(app.status.text.contains(":q"), "{}", app.status.text);
+
+        typed(&mut app, "dec");
+        ctrl(&mut app, 'c');
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "it leaves the command line like Esc"
+        );
     }
 
     #[test]

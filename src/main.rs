@@ -3,10 +3,13 @@
 mod app;
 mod complete;
 mod model;
+mod search;
 mod store;
 mod textinput;
 mod ui;
 mod util;
+
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use chrono::Local;
@@ -65,14 +68,21 @@ fn run_tui() -> Result<()> {
     ratatui::run(|terminal| event_loop(terminal, &mut app))
 }
 
+/// How long to sit waiting for a key before redrawing anyway. A session left
+/// open across midnight would otherwise show yesterday's due counts until
+/// the next key arrived.
+const IDLE_REDRAW: Duration = Duration::from_secs(30);
+
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     while !app.quit {
         app.refresh_today();
         terminal.draw(|frame| ui::render(frame, app))?;
-        match event::read()? {
-            Event::Key(key) => app.on_key(key)?,
-            Event::Resize(_, _) => {}
-            _ => {}
+        if !event::poll(IDLE_REDRAW)? {
+            continue;
+        }
+        // A resize needs nothing more than the redraw at the top of the loop.
+        if let Event::Key(key) = event::read()? {
+            app.on_key(key)?;
         }
     }
     if app.dirty {

@@ -107,7 +107,8 @@ Everything is modal and Vim-shaped.
 | `M` | drill the words carrying a status |
 | `u` `Ctrl-r` | undo / redo a change — or undo the last answer, while reviewing |
 | `a` `o` `i` `dd` `x` | add / edit / delete / suspend a card |
-| `/text` `n` `N` `:noh` | search |
+| `/text` `n` `N` | jump to a word as you type it, then step through the matches |
+| `f` `:noh` | filter the list as you type, then show everything again |
 | `:w` `:q` `:wq` `:qa` `ZZ` | write and quit |
 | `:q!` `:qa!` `ZQ` | quit without saving |
 
@@ -193,8 +194,37 @@ was `marked` becomes `★ marked`.
 definition, examples and notes, laid out as they are in review — in a `card`
 pane below the list, so the pane gets the whole width for prose and the list
 keeps its columns. Terminals under 22 rows skip it and give everything to the
-list. A `…` in the pane's border means the word has more text than fits;
-`Enter` opens it in the editor.
+list. A `…` in the pane's border means the word has more text than fits.
+
+`Enter` opens the word on its own, laid out the way a revealed review card is
+— definition, then its examples, notes and look-alikes under headings — at a
+width prose is comfortable to read at. `j` / `k` scroll a long one, `J` / `K`
+(or `Tab` / `Shift-Tab`) step to the next or previous word without going back
+to the list, `m` and `x` work as they do in the list, `i` opens the editor,
+and `q` goes back with the cursor on whichever word you ended on.
+
+### Finding a word
+
+`/` moves the cursor; `f` narrows the list. Both answer as you type, before
+`Enter`, and `Esc` puts things back the way they were.
+
+```
+/abd       the cursor jumps to Abdicate; the list stays whole
+n  N       the next / previous match, best first
+f abd      only the matching words are listed, best first
+:noh       forget the search and the filter
+```
+
+Neither needs the spelling right. A query is matched case- and
+accent-insensitively — `naive` finds `naïve`, and `ni hao` or `nihao` finds a
+card read `nǐ hǎo` — against the term, its reading, and then the prose. Matches
+are ranked: the word itself, then words starting with what you typed, then the
+text anywhere in a term, then a definition or example that mentions it. When
+no term matches as typed, words within a typo or two are offered instead —
+one for a query of four to six letters, two up to ten, three beyond — so
+`ubiqitus` still lands on Ubiquitous, and the status line says the match was a
+close spelling rather than an exact one. Queries under four letters are taken
+literally.
 
 ### Practising from the list
 
@@ -341,6 +371,9 @@ write.
 
 Writes go through a temp file and a
 rename, so an interrupted save cannot truncate your collection. The temp file
+is flushed to disk before the rename and the directory after it, so a power
+cut cannot leave the new name pointing at a file whose contents never made it
+out of the cache. The temp file
 carries the writing process's pid, so two gram instances cannot rename each
 other's half-written file into place.
 
@@ -389,6 +422,13 @@ Accuracy says how the sessions went. Retention says whether the schedule is
 working: if it sits low, the intervals are growing faster than your memory.
 Collections logged before gram recorded which answers came from drills count
 as scheduled reviews, which is what they were unless you were drilling.
+
+## Colour
+
+gram uses fixed entries from the 256-colour palette rather than the terminal's
+sixteen named colours, so secondary text stays readable whatever scheme the
+terminal is using. Set [`NO_COLOR`](https://no-color.org) to turn colour off:
+selected rows and badges are then shown in reverse video.
 
 ## Non-Latin text
 

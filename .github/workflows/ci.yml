@@ -69,3 +69,22 @@ jobs:
       # shows up immediately.
       - name: Check the layout in a terminal
         run: python3 tools/check_layout.py
+
+  # Cargo.toml promises rust-version; this keeps the promise honest, so a
+  # newer-only API cannot slip in while stable moves on.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --all-targets
+
+  # Known advisories against anything in Cargo.lock.
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

@@ -63,7 +63,8 @@ pub fn modified(path: &Path) -> Option<SystemTime> {
 /// Write via a temp file and rename, so an interrupted save can't truncate
 /// the collection.
 pub fn save_to(db: &Db, path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    if let Some(parent) = parent {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
     let json = serde_json::to_string_pretty(db)?;
@@ -71,12 +72,32 @@ pub fn save_to(db: &Db, path: &Path) -> Result<()> {
     // instances saving at once can rename each other's half-written file over
     // the collection.
     let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
-    fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
+    if let Err(err) = write_durably(&tmp, json.as_bytes()) {
+        let _ = fs::remove_file(&tmp);
+        return Err(err).with_context(|| format!("writing {}", tmp.display()));
+    }
     if let Err(err) = fs::rename(&tmp, path) {
         let _ = fs::remove_file(&tmp);
         return Err(err).with_context(|| format!("replacing {}", path.display()));
     }
+    // The rename lives in the directory, which has its own buffers. Without
+    // this a crash can still bring back the old name after the save returned.
+    // Best effort: not every platform lets a directory be opened to sync.
+    if let Ok(dir) = fs::File::open(parent.unwrap_or(Path::new("."))) {
+        let _ = dir.sync_all();
+    }
     Ok(())
+}
+
+/// Write `bytes` and wait for them to reach the disk. The rename that follows
+/// is only safe once they have: a filesystem is free to make the rename
+/// durable first, and a power cut in between leaves an empty collection
+/// under the right name.
+fn write_durably(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = fs::File::create(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
 }
 
 /// Copy the collection aside, under a name that says what it is, and return
@@ -235,8 +256,8 @@ fn classify(header: &str) -> Column {
         "definition" | "def" | "meaning" | "back" | "translation" | "gloss" => Column::Definition,
         "example" | "examples" | "sentence" | "sentences" | "usage" | "context" => Column::Example,
         "notes" | "note" | "extra" | "comment" | "related" => Column::Notes,
-        "confusing" | "confusable" | "confusables" | "confused" | "confusedwith"
-        | "lookalike" | "lookalikes" | "similar" => Column::Confusing,
+        "confusing" | "confusable" | "confusables" | "confused" | "confusedwith" | "lookalike"
+        | "lookalikes" | "similar" => Column::Confusing,
         _ => Column::Ignore,
     }
 }

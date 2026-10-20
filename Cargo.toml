@@ -2,6 +2,8 @@
 name = "gram"
 version = "0.1.0"
 edition = "2024"
+# let-chains need 1.88, and so does ratatui 0.30.
+rust-version = "1.88"
 
 [dependencies]
 anyhow = "1.0.104"

@@ -14,26 +14,33 @@ use crate::util::{self, pad, truncate};
 use crate::util::{humanize_days, split_emphasis};
 
 // One palette, used by role rather than by name, so the screens stay
-// consistent with each other.
+// consistent with each other. Fixed entries of the 256-colour table rather
+// than the sixteen named colours: those are whatever the terminal's scheme
+// says, and in plenty of schemes "dark grey" is all but invisible on black.
 /// Chrome: titles, focus, the program's own voice.
-const ACCENT: Color = Color::Cyan;
-/// Secondary text: labels, captions, anything you read second.
-const DIM: Color = Color::DarkGray;
+const ACCENT: Color = Color::Indexed(111);
+/// Secondary text: labels, captions, anything you read second. Still meant
+/// to be read, so it stays well clear of the background.
+const DIM: Color = Color::Indexed(245);
+/// Lines and borders: structure you should see without reading.
+const FAINT: Color = Color::Indexed(240);
 /// Body text. Brighter than DIM, calmer than white.
-const TEXT: Color = Color::Gray;
+const TEXT: Color = Color::Indexed(252);
 /// Emphasis inside body text — a heading, a term, the answer.
-const BRIGHT: Color = Color::White;
+const BRIGHT: Color = Color::Indexed(255);
 /// Card states, shared by every count, badge and column that names them.
-const NEW: Color = Color::LightBlue;
-const LEARN: Color = Color::LightMagenta;
-const DUE: Color = Color::LightGreen;
+const NEW: Color = Color::Indexed(75);
+const LEARN: Color = Color::Indexed(176);
+const DUE: Color = Color::Indexed(114);
 /// The ★ study pile, and emphasised words inside example sentences.
-const MARK: Color = Color::Yellow;
+const MARK: Color = Color::Indexed(221);
 /// Something needs attention: overdue cards, "I don't know", errors.
-const WARN: Color = Color::LightRed;
+const WARN: Color = Color::Indexed(210);
+/// Text drawn on a coloured badge.
+const ON_BADGE: Color = Color::Indexed(234);
 /// Selected row, and the header strip above a table.
 const SEL_BG: Color = Color::Indexed(237);
-const HEAD_BG: Color = Color::Indexed(234);
+const HEAD_BG: Color = Color::Indexed(235);
 
 /// Widest the review card gets, borders included. Roughly 76 columns of text,
 /// which is about as long a line as prose stays readable at.
@@ -72,7 +79,35 @@ fn table_header(labels: Line<'static>) -> Paragraph<'static> {
     Paragraph::new(labels).style(Style::default().bg(HEAD_BG))
 }
 
+/// Whether to paint at all. <https://no-color.org>: set and not empty means
+/// no colour, whatever its value.
+fn colour_wanted() -> bool {
+    static WANTED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *WANTED.get_or_init(|| std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty()))
+}
+
+/// Strip the colour out of a drawn frame. Done on the finished buffer, so no
+/// screen has to know about it. What colour alone was saying — this row is
+/// selected, this is a badge — is said with reverse video instead.
+fn drop_colour(frame: &mut Frame) {
+    for cell in frame.buffer_mut().content.iter_mut() {
+        let badge = !matches!(cell.bg, Color::Reset) && cell.bg != HEAD_BG;
+        cell.fg = Color::Reset;
+        cell.bg = Color::Reset;
+        if badge {
+            cell.modifier.insert(Modifier::REVERSED);
+        }
+    }
+}
+
 pub fn render(frame: &mut Frame, app: &mut App) {
+    draw(frame, app);
+    if !colour_wanted() {
+        drop_colour(frame);
+    }
+}
+
+fn draw(frame: &mut Frame, app: &mut App) {
     let [header, body, status] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
@@ -88,6 +123,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Screen::Review => render_review(frame, app, body),
         Screen::Stats => render_stats(frame, app, body),
         Screen::Help => render_help(frame, app, body),
+        Screen::Card => render_card_view(frame, app, body),
     }
 
     if app.editor.is_some() {
@@ -130,7 +166,7 @@ fn render_wildmenu(frame: &mut Frame, completion: &Completion, area: Rect) {
     }
     for index in shown.clone() {
         let style = if completion.index == Some(index) {
-            Style::default().fg(Color::Black).bg(ACCENT).bold()
+            Style::default().fg(ON_BADGE).bg(ACCENT).bold()
         } else {
             Style::default().fg(TEXT)
         };
@@ -202,6 +238,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Screen::Review => "review",
         Screen::Stats => "stats",
         Screen::Help => "help",
+        Screen::Card => "word",
     };
 
     let drilling = app
@@ -247,10 +284,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
     .areas(area);
 
     let mut spans = vec![
-        Span::styled(
-            " gram ",
-            Style::default().fg(Color::Black).bg(ACCENT).bold(),
-        ),
+        Span::styled(" gram ", Style::default().fg(ON_BADGE).bg(ACCENT).bold()),
         Span::raw(" "),
         Span::styled(screen, Style::default().fg(ACCENT)),
     ];
@@ -277,13 +311,41 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    // In `:`/`/` mode the status line becomes the command line.
-    if matches!(app.mode, Mode::Command | Mode::Search) {
-        let prefix = if app.mode == Mode::Command { ':' } else { '/' };
-        let width = area.width.saturating_sub(2) as usize;
+    // In `:`, `/` and `f` the status line becomes the command line, and the
+    // search and filter say how many they have found as you type.
+    if matches!(app.mode, Mode::Command | Mode::Search | Mode::Filter) {
+        let (prefix, found) = match app.mode {
+            Mode::Command => (":", None),
+            Mode::Search => ("/", Some(app.search_matches().len())),
+            _ => ("filter ", Some(app.rows.len())),
+        };
+        let tally = match found {
+            _ if app.line.is_empty() => String::new(),
+            Some(0) => " no match ".to_string(),
+            Some(1) => " 1 match ".to_string(),
+            Some(n) => format!(" {n} matches "),
+            None => String::new(),
+        };
+        let tally_style = if found == Some(0) {
+            Style::default().fg(WARN)
+        } else {
+            Style::default().fg(DIM)
+        };
+        let reserved = util::width(prefix) + util::width(&tally) + 1;
+        let width = (area.width as usize).saturating_sub(reserved);
         let (visible, offset) = window(app.line.value(), app.line.cursor(), width);
-        frame.render_widget(Paragraph::new(format!("{prefix}{visible}")), area);
-        let column = area.x + 1 + offset as u16;
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(prefix, Style::default().fg(ACCENT).bold()),
+                Span::styled(visible, Style::default().fg(BRIGHT)),
+            ])),
+            area,
+        );
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(tally, tally_style)).right_aligned()),
+            area,
+        );
+        let column = area.x + util::width(prefix) as u16 + offset as u16;
         frame.set_cursor_position(Position::new(
             column.min(area.right().saturating_sub(1)),
             area.y,
@@ -292,8 +354,8 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let mode_style = match app.mode {
-        Mode::Insert => Style::default().fg(Color::Black).bg(DUE).bold(),
-        _ => Style::default().fg(Color::Black).bg(DIM).bold(),
+        Mode::Insert => Style::default().fg(ON_BADGE).bg(DUE).bold(),
+        _ => Style::default().fg(ON_BADGE).bg(DIM).bold(),
     };
 
     let mut left = vec![];
@@ -341,10 +403,10 @@ fn panel(title: &str) -> Block<'_> {
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(DIM))
+        .border_style(Style::default().fg(FAINT))
         .title(Span::styled(
             format!(" {title} "),
-            Style::default().fg(ACCENT),
+            Style::default().fg(ACCENT).bold(),
         ))
 }
 
@@ -558,6 +620,8 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
         definition_width
     };
     let today = app.today;
+    // What `/` found, picked out in the list it left whole.
+    let found: std::collections::HashSet<usize> = app.search_matches().into_iter().collect();
 
     let items: Vec<ListItem> = app
         .rows
@@ -585,6 +649,8 @@ fn render_browse(frame: &mut Frame, app: &mut App, area: Rect) {
 
             let term_style = if card.suspended {
                 Style::default().fg(DIM).add_modifier(Modifier::CROSSED_OUT)
+            } else if found.contains(&row) {
+                Style::default().fg(MARK).bold().underlined()
             } else {
                 Style::default().fg(BRIGHT).bold()
             };
@@ -702,49 +768,42 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
     // the definition is masked in the list and spelled out an inch below it.
     let hidden = app.meaning_hidden(app.browse_sel);
 
-    let (lines, rows) = match card {
+    let lines = match card {
         Some(card) => {
             let mut lines = vec![card_head(card), Line::from("")];
             if hidden {
                 lines.extend(card_body_hidden(width));
             } else {
-                lines.extend(card_body(card, width));
+                lines.extend(card_body(card, width, false));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 scheduling_summary(card),
                 Style::default().fg(DIM),
             )));
-            // Everything bar the definition is already wrapped to `width`.
-            let rows = if hidden {
-                lines.len()
-            } else {
-                lines.len() + wrapped_lines(&card.definition, width).saturating_sub(1) as usize
-            };
-            (lines, rows)
+            lines
         }
-        None => (
-            vec![Line::from(Span::styled(
-                "nothing selected",
-                Style::default().fg(DIM).italic(),
-            ))],
-            1,
-        ),
+        None => vec![Line::from(Span::styled(
+            "nothing selected",
+            Style::default().fg(DIM).italic(),
+        ))],
     };
 
-    // A glance, not a reader: say when there is more and leave it at that.
-    if rows > area.height.saturating_sub(2) as usize {
+    // A glance, not a reader: say when there is more, and how to read it.
+    if lines.len() > area.height.saturating_sub(2) as usize {
         block = block.title_bottom(
-            Line::from(Span::styled(" … ", Style::default().fg(DIM))).right_aligned(),
+            Line::from(vec![
+                Span::styled(" … ", Style::default().fg(DIM)),
+                Span::styled("Enter", Style::default().fg(ACCENT).bold()),
+                Span::styled(" to read it all ", Style::default().fg(DIM)),
+            ])
+            .right_aligned(),
         );
     }
 
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    // Every line is wrapped already, so there is nothing for the paragraph
+    // to wrap — and the count above is the count of rows.
+    frame.render_widget(Paragraph::new(lines).block(block), area);
 }
 
 // -- a card, drawn ---------------------------------------------------------
@@ -787,25 +846,48 @@ fn card_body_hidden(width: usize) -> Vec<Line<'static>> {
     ]
 }
 
+/// A small caps label over one part of the card, so a long answer can be
+/// read by skimming down its headings.
+fn section(label: &str) -> Line<'static> {
+    Line::from(Span::styled(
+        format!("  {label}"),
+        Style::default().fg(DIM).bold(),
+    ))
+}
+
+/// A rule across the card, between the word and what it means.
+fn rule(width: usize) -> Line<'static> {
+    Line::from(Span::styled("─".repeat(width), Style::default().fg(FAINT)))
+}
+
 /// Everything behind the word: definition, examples, notes. Shared by the
-/// review card and the browser's preview, so they read the same.
-fn card_body(card: &Card, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(Span::styled(
-        card.definition.clone(),
-        Style::default().fg(BRIGHT).bold(),
-    ))];
+/// review card, the word view and the browser's preview, so they read the
+/// same. `labelled` heads each part with what it is, which the full-size
+/// cards have room for and the preview pane does not.
+fn card_body(card: &Card, width: usize, labelled: bool) -> Vec<Line<'static>> {
+    let mut lines = wrap_prose(&Prose::definition(), &card.definition, width);
 
     // One blank line ahead of each example, so a run of them reads as
     // separate sentences rather than a single grey block.
     let example = Prose::example();
-    for text in card.examples() {
+    let mut examples = card.examples().peekable();
+    if labelled && examples.peek().is_some() {
         lines.push(Line::from(""));
+        lines.push(section("EXAMPLES"));
+    }
+    for (i, text) in examples.enumerate() {
+        if !labelled || i > 0 {
+            lines.push(Line::from(""));
+        }
         lines.extend(wrap_prose(&example, text, width));
     }
 
     if !card.notes.is_empty() {
         let note = Prose::note();
         lines.push(Line::from(""));
+        if labelled {
+            lines.push(section("NOTES"));
+        }
         for text in card.notes.lines().filter(|l| !l.trim().is_empty()) {
             lines.extend(wrap_prose(&note, text, width));
         }
@@ -817,10 +899,14 @@ fn card_body(card: &Card, width: usize) -> Vec<Line<'static>> {
     if confusables.peek().is_some() {
         let confusable = Prose::confusable();
         lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "  don't confuse with",
-            Style::default().fg(WARN).italic(),
-        )));
+        lines.push(if labelled {
+            section("DON'T CONFUSE WITH")
+        } else {
+            Line::from(Span::styled(
+                "  don't confuse with",
+                Style::default().fg(WARN).italic(),
+            ))
+        });
         for text in confusables {
             lines.extend(wrap_prose(&confusable, text, width));
         }
@@ -863,59 +949,24 @@ fn render_review(frame: &mut Frame, app: &mut App, area: Rect) {
     let card_area = centered(card_area, CARD_MEASURE);
     render_progress(frame, app, centered(progress_area, CARD_MEASURE));
 
-    // Borders take 2 columns and the panel's horizontal padding another 4.
-    let text_width = card_area.width.saturating_sub(6) as usize;
-
-    let mut lines: Vec<Line> = vec![Line::from(""), card_head(card), Line::from("")];
-
-    if revealed {
-        lines.extend(card_body(card, text_width));
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            scheduling_summary(card),
-            Style::default().fg(DIM),
-        )));
+    let lines = if revealed {
+        full_card(card, card_text_width(card_area))
     } else {
-        lines.push(Line::from(Span::styled(
-            "  press space to reveal",
-            Style::default().fg(DIM).italic(),
-        )));
-    }
-
-    // A card with several long examples outgrows the panel, so it scrolls.
-    // Every line above is pre-wrapped bar the definition, which the paragraph
-    // wraps itself — measure that one so the clamp counts real rows.
-    let rows = lines.len() + wrapped_lines(&card.definition, text_width).saturating_sub(1) as usize;
-    let visible = card_area.height.saturating_sub(2) as usize;
-    let max_scroll = rows.saturating_sub(visible) as u16;
-    app.card_scroll = app.card_scroll.min(max_scroll);
-    let scroll = app.card_scroll;
-
-    let mut block =
-        panel(if revealed { "answer" } else { "recall" }).padding(Padding::horizontal(2));
-    // What is still off-screen, in the bottom border where it costs no room.
-    if max_scroll > 0 {
-        let mut marks = Vec::new();
-        if scroll > 0 {
-            marks.push("↑ k");
-        }
-        if scroll < max_scroll {
-            marks.push("↓ j");
-        }
-        block = block.title_bottom(
+        vec![
+            Line::from(""),
+            card_head(card),
+            Line::from(""),
             Line::from(Span::styled(
-                format!(" {} ", marks.join("  ")),
-                Style::default().fg(ACCENT),
-            ))
-            .right_aligned(),
-        );
-    }
-
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll, 0)),
+                "  press space to reveal",
+                Style::default().fg(DIM).italic(),
+            )),
+        ]
+    };
+    render_scrolling_card(
+        frame,
+        app,
+        lines,
+        if revealed { "answer" } else { "recall" },
         card_area,
     );
 
@@ -942,6 +993,106 @@ fn render_review(frame: &mut Frame, app: &mut App, area: Rect) {
             grade_area.inner(Margin::new(0, 1)),
         );
     }
+}
+
+/// Columns of text inside a full-size card: borders take 2 columns and the
+/// panel's horizontal padding another 4.
+fn card_text_width(area: Rect) -> usize {
+    area.width.saturating_sub(6) as usize
+}
+
+/// A card turned over: the word, a rule, then everything behind it under
+/// headings. What the review answer and the word view both show.
+fn full_card(card: &Card, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(""), card_head(card), rule(width), Line::from("")];
+    lines.extend(card_body(card, width, true));
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        scheduling_summary(card),
+        Style::default().fg(DIM),
+    )));
+    lines
+}
+
+/// Draw a card that may be taller than its panel. Every line comes in
+/// wrapped already, so the count of lines is the count of rows, and the
+/// scroll is clamped against it here, where the size is known.
+fn render_scrolling_card(
+    frame: &mut Frame,
+    app: &mut App,
+    lines: Vec<Line<'static>>,
+    title: &str,
+    area: Rect,
+) {
+    let visible = area.height.saturating_sub(2) as usize;
+    let max_scroll = lines.len().saturating_sub(visible) as u16;
+    app.card_scroll = app.card_scroll.min(max_scroll);
+    let scroll = app.card_scroll;
+
+    let mut block = panel(title).padding(Padding::horizontal(2));
+    // What is still off-screen, in the bottom border where it costs no room.
+    if max_scroll > 0 {
+        let mut marks = Vec::new();
+        if scroll > 0 {
+            marks.push("↑ k");
+        }
+        if scroll < max_scroll {
+            marks.push("↓ j");
+        }
+        block = block.title_bottom(
+            Line::from(Span::styled(
+                format!(" {} ", marks.join("  ")),
+                Style::default().fg(ACCENT),
+            ))
+            .right_aligned(),
+        );
+    }
+
+    frame.render_widget(Paragraph::new(lines).block(block).scroll((scroll, 0)), area);
+}
+
+/// The word view: one card from the browser, in full and at a readable
+/// measure, opened with Enter. The same layout as a revealed review card, so
+/// a word reads the same wherever you meet it.
+fn render_card_view(frame: &mut Frame, app: &mut App, area: Rect) {
+    let card = app
+        .selected_card()
+        .and_then(|(deck_id, index)| app.db.deck_by_id(deck_id)?.cards.get(index))
+        .cloned();
+    let [card_area, hint_area] =
+        Layout::vertical([Constraint::Min(5), Constraint::Length(1)]).areas(area);
+    let card_area = centered(card_area, CARD_MEASURE);
+
+    let Some(card) = card else {
+        frame.render_widget(
+            Paragraph::new(Span::styled(
+                "  no card here — q to go back",
+                Style::default().fg(DIM).italic(),
+            ))
+            .block(panel("word")),
+            card_area,
+        );
+        return;
+    };
+
+    let lines = full_card(&card, card_text_width(card_area));
+    let title = format!("word {} of {}", app.browse_sel + 1, app.rows.len());
+    render_scrolling_card(frame, app, lines, &title, card_area);
+
+    let hint = Line::from(vec![
+        hint_key("j k"),
+        Span::styled(" scroll   ", Style::default().fg(DIM)),
+        hint_key("J K"),
+        Span::styled(" next / previous word   ", Style::default().fg(DIM)),
+        hint_key("i"),
+        Span::styled(" edit   ", Style::default().fg(DIM)),
+        hint_key("m"),
+        Span::styled(" status   ", Style::default().fg(DIM)),
+        hint_key("q"),
+        Span::styled(" back", Style::default().fg(DIM)),
+    ])
+    .centered();
+    frame.render_widget(Paragraph::new(hint), hint_area);
 }
 
 fn hint_key(key: &str) -> Span<'static> {
@@ -1018,7 +1169,7 @@ fn render_grades_binary(frame: &mut Frame, app: &App, card: &Card, area: Rect) {
             Line::from(vec![
                 Span::styled(
                     format!(" {key} "),
-                    Style::default().fg(Color::Black).bg(color).bold(),
+                    Style::default().fg(ON_BADGE).bg(color).bold(),
                 ),
                 Span::styled(format!("  {label}"), Style::default().fg(color).bold()),
             ])
@@ -1043,7 +1194,7 @@ fn render_grades_sm2(frame: &mut Frame, app: &App, card: &Card, area: Rect) {
             Line::from(vec![
                 Span::styled(
                     format!("{} ", grade.key()),
-                    Style::default().fg(Color::Black).bg(colors[i]).bold(),
+                    Style::default().fg(ON_BADGE).bg(colors[i]).bold(),
                 ),
                 Span::styled(
                     format!(" {}", grade.label()),
@@ -1108,6 +1259,18 @@ struct Prose {
 }
 
 impl Prose {
+    /// The definition: the answer, so the brightest thing on the card, set
+    /// in the same column as the bullets' text below it.
+    fn definition() -> Self {
+        let style = Style::default().fg(BRIGHT).bold();
+        Self {
+            marker: Span::raw("  "),
+            continuation: Span::raw("  "),
+            body: style,
+            emphasis: style.fg(MARK),
+        }
+    }
+
     /// An example sentence: an accented bullet, body text, and the target word
     /// picked out so the eye lands on it first.
     fn example() -> Self {
@@ -1616,6 +1779,7 @@ MOVING AROUND
   Ctrl-d/u       half page                 :42         jump to line 42
   { / }          up / down ten rows        3}          down thirty
   h / l          back / forward            Enter       open
+  Ctrl-c         says how to quit          :q          back / quit
   q / Esc        back one screen           ZZ          save and quit
   ?              this help                 S           statistics
 
@@ -1627,16 +1791,27 @@ DECKS
   Enter / l      browse its cards          dd          delete deck (confirms)
 
 BROWSING
-  /text          filter cards              n / N       next / previous match
-  :noh           clear filter and marks    i / Enter   edit the card
+  /text          jump to a word            n / N       next / previous match
+  f text         filter the list           :noh        clear search and filter
+  Enter          read the word in full     i           edit the card
   a / o          add a card                dd          delete card
   u / Ctrl-r     undo / redo a change      x           suspend / unsuspend
   m              cycle the STATUS column   :marked     show only flagged
   z              hide / show meanings      space       check the one word
 
-  The selected word is shown in full in the `card` pane below the list, where
-  the terminal is tall enough. `…` in its border means there is more than
-  fits; Enter opens the whole thing in the editor.
+  The selected word is shown in the `card` pane below the list, where the
+  terminal is tall enough. `…` in its border means there is more than fits.
+
+  / and f both answer as you type, and Esc puts the cursor and the list back.
+  Spelling need not be exact: case, accents and tone marks are ignored, and
+  when no word matches as typed, ones a typo or two away are offered instead.
+
+READING A WORD
+  Enter on a word opens it on its own, laid out like a revealed review card.
+  j / k          scroll a long card        gg / G      top / bottom
+  J / K          next / previous word      Tab         next word too
+  i / e          edit it                   m / x       status / suspend
+  q / h          back to the list          n / N       next / previous match
 
 PRACTISING FROM THE LIST
   z covers every meaning in the browser — the DEFINITION column and the card
@@ -1778,7 +1953,7 @@ fn render_help(frame: &mut Frame, app: &mut App, area: Rect) {
             if !line.starts_with(' ') && !line.is_empty() {
                 Line::from(Span::styled(
                     line.to_string(),
-                    Style::default().fg(ACCENT).bold(),
+                    Style::default().fg(MARK).bold(),
                 ))
             } else {
                 // Colour the key column.
@@ -1789,7 +1964,7 @@ fn render_help(frame: &mut Frame, app: &mut App, area: Rect) {
                     .unwrap_or(line.len());
                 let (keys, rest) = line.split_at(split);
                 Line::from(vec![
-                    Span::styled(keys.to_string(), Style::default().fg(MARK)),
+                    Span::styled(keys.to_string(), Style::default().fg(ACCENT)),
                     Span::styled(rest.to_string(), Style::default().fg(TEXT)),
                 ])
             }
@@ -2002,7 +2177,7 @@ mod tests {
         );
         card.notes = "a note".into();
         card.confusing = "effect — a result\n\neffete".into();
-        let text: Vec<String> = card_body(&card, 60).iter().map(flat).collect();
+        let text: Vec<String> = card_body(&card, 60, false).iter().map(flat).collect();
         let heading = text.iter().position(|l| l.contains("don't confuse with"));
         let note = text.iter().position(|l| l.contains("a note"));
         assert!(heading > note, "after the notes: {text:?}");
@@ -2012,7 +2187,7 @@ mod tests {
         );
 
         card.confusing.clear();
-        let text: Vec<String> = card_body(&card, 60).iter().map(flat).collect();
+        let text: Vec<String> = card_body(&card, 60, false).iter().map(flat).collect();
         assert!(!text.iter().any(|l| l.contains("confuse")), "{text:?}");
     }
 

@@ -105,7 +105,7 @@ impl App {
         let Some(deck) = self.db.deck_by_id(deck_id) else {
             return;
         };
-        let Some(term) = deck.card(card_id).map(|c| c.term.clone()) else {
+        let Some(term) = deck.card(card_id).map(|c| speech::spoken(&c.term)) else {
             return;
         };
         let language = Language::of(deck.cards.iter().map(|c| c.term.as_str()));

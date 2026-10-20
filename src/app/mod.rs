@@ -10,7 +10,7 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crate::complete;
 use crate::model::{Card, CardState, Db, Deck, Grade, Grading, MAX_LOG, ReviewLog, Study};
 use crate::search::{self, Query};
-use crate::speech::{Language, Speaker};
+use crate::speech::{self, Language, Speaker};
 use crate::store;
 use crate::textinput::TextInput;
 use crate::util::Rng;

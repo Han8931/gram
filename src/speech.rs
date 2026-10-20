@@ -142,6 +142,14 @@ fn command(program: &str, voice: Option<&str>, language: Language, text: &str) -
     command
 }
 
+/// What to hand the voice for `term`. Lower case, because decks capitalise
+/// their headwords and a capital tells the voice it is reading a name:
+/// Samantha says Word Smart's `Abate` like the Italian surname, ah-BAH-tay,
+/// and `abate` like the word. Scripts without case are left as they are.
+pub fn spoken(term: &str) -> String {
+    term.trim().to_lowercase()
+}
+
 /// Speaks one word at a time: a new word cuts the last one off rather than
 /// queueing behind it.
 #[derive(Default)]
@@ -237,6 +245,13 @@ Tingting            zh_CN    # 你好！我叫婷婷。
             pick_say_voice(&voices, Language::Korean).as_deref(),
             Some("Flo (Korean)")
         );
+    }
+
+    #[test]
+    fn headwords_are_spoken_as_words_not_names() {
+        assert_eq!(spoken("Abate"), "abate");
+        assert_eq!(spoken(" Bona fide "), "bona fide");
+        assert_eq!(spoken("你好"), "你好");
     }
 
     #[test]

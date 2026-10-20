@@ -139,7 +139,9 @@ fn draw(frame: &mut Frame, app: &mut App) {
 
     // What `/` has found, worked out once a frame: the list picks the matches
     // out and the command line counts them, and both want the same answer.
-    let found = if app.screen == Screen::Browse {
+    // Once the cursor moves off the match it was taken to, there is nothing
+    // left to pick out.
+    let found = if app.screen == Screen::Browse && app.search_highlighted() {
         app.search_matches()
     } else {
         Vec::new()

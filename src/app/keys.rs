@@ -19,6 +19,7 @@ impl App {
                 self.screen = Screen::Decks;
                 self.filter.clear();
                 self.search.clear();
+                self.search_at = None;
             }
             Screen::Card => {
                 self.screen = Screen::Browse;
@@ -347,6 +348,8 @@ impl App {
         let explicit = self.take_count_opt();
         let count = explicit.unwrap_or(1) as isize;
         match key.code {
+            // Esc puts a search highlight away before it leaves the screen.
+            KeyCode::Esc if self.screen == Screen::Browse && self.hide_search() => {}
             KeyCode::Char('q') | KeyCode::Esc => self.back(),
             KeyCode::Char(':') => {
                 self.mode = Mode::Command;

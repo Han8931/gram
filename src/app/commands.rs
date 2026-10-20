@@ -363,6 +363,7 @@ impl App {
             "nohl" | "nohlsearch" | "noh" => {
                 self.filter.clear();
                 self.search.clear();
+                self.search_at = None;
                 self.status_filter = StatusFilter::Off;
                 self.refresh_rows();
             }

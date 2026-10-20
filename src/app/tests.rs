@@ -1246,6 +1246,36 @@ fn n_steps_through_the_matches_best_first() {
 }
 
 #[test]
+fn moving_off_a_match_puts_the_highlight_away() {
+    let mut app = app_with_words(&["abash", "abate", "abated"]);
+    app.on_key(key('/')).unwrap();
+    keys(&mut app, "abate");
+    assert!(app.search_highlighted(), "while typing");
+    press(&mut app, KeyCode::Enter);
+    assert!(app.search_highlighted(), "on the match it landed on");
+    app.on_key(key('j')).unwrap();
+    assert!(!app.search_highlighted(), "gone once the cursor moves on");
+    app.on_key(key('n')).unwrap();
+    assert!(app.search_highlighted(), "n brings it back");
+}
+
+#[test]
+fn esc_puts_the_highlight_away_before_leaving_the_list() {
+    let mut app = app_with_words(&["abash", "abate"]);
+    app.on_key(key('/')).unwrap();
+    keys(&mut app, "abate");
+    press(&mut app, KeyCode::Enter);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Browse, "the first Esc only hides it");
+    assert!(!app.search_highlighted());
+    app.on_key(key('n')).unwrap();
+    assert_eq!(selected_term(&app), "abate", "the search is still there for n");
+    press(&mut app, KeyCode::Esc);
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(app.screen, Screen::Decks);
+}
+
+#[test]
 fn noh_forgets_the_search() {
     let mut app = app_with_words(&["abash", "abate"]);
     app.on_key(key('/')).unwrap();

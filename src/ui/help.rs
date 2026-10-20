@@ -36,6 +36,8 @@ BROWSING
   / and f both answer as you type, and Esc puts the cursor and the list back.
   Spelling need not be exact: case, accents and tone marks are ignored, and
   when no word matches as typed, ones a typo or two away are offered instead.
+  The matches stay picked out until you move off them or press Esc; n / N
+  bring them back.
 
 READING A WORD
   Enter on a word opens it on its own, laid out like a revealed review card.

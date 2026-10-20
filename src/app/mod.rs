@@ -329,6 +329,10 @@ pub struct App {
     /// The last `/` search: what `n` and `N` step through, and what the
     /// browser picks out. The list itself is left whole.
     pub search: String,
+    /// The card `/`, `n` or `N` last landed on. The browser picks out the
+    /// matches only while the cursor is still on it, so moving on puts the
+    /// highlight away by itself; `n` and `N` bring it back.
+    search_at: Option<usize>,
     /// Where the cursor, the filter and the search were when `/` or `f`
     /// opened, so `Esc` can put them back.
     line_origin: Option<(usize, String)>,
@@ -397,6 +401,7 @@ impl App {
             rows: Vec::new(),
             filter: String::new(),
             search: String::new(),
+            search_at: None,
             line_origin: None,
             status_filter: StatusFilter::default(),
             hide_meanings: false,

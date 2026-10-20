@@ -13,6 +13,24 @@ impl App {
         }
     }
 
+    /// Whether the browser should pick out the matches: always while `/` is
+    /// being typed, and afterwards only until the cursor leaves the match it
+    /// was taken to.
+    pub fn search_highlighted(&self) -> bool {
+        self.mode == Mode::Search
+            || self
+                .search_at
+                .is_some_and(|card| self.rows.get(self.browse_sel) == Some(&card))
+    }
+
+    /// Put the highlight away without forgetting the search, so `n` and `N`
+    /// still work. Returns whether there was one to put away.
+    pub(super) fn hide_search(&mut self) -> bool {
+        let shown = self.search_highlighted();
+        self.search_at = None;
+        shown
+    }
+
     /// Rows matching the search, as positions in the list, best match first.
     pub fn search_matches(&self) -> Vec<usize> {
         let query = Query::new(self.search_query());
@@ -66,6 +84,7 @@ impl App {
             None => len - 1,
         };
         self.browse_sel = matches[next];
+        self.search_at = self.rows.get(self.browse_sel).copied();
         self.info(format!("match {} of {len} for {:?}", next + 1, self.search));
     }
 
@@ -132,6 +151,7 @@ impl App {
             None => self.error(format!("no match for {:?}", self.search)),
             Some(&best) => {
                 self.browse_sel = best;
+                self.search_at = self.rows.get(best).copied();
                 let rows = &self.rows;
                 let fuzzy = Query::new(&self.search);
                 let close = self

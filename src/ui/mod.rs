@@ -271,11 +271,13 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Screen::Card => "word",
     };
 
-    let drilling = app
-        .session
-        .as_ref()
-        .filter(|s| matches!(s.scope, Scope::Flagged(_)))
-        .map(|s| format!("  drilling {}", s.scope.label()));
+    // Say when a session is not the plain due one, so a short queue of new
+    // words is not mistaken for the whole of today's work.
+    let drilling = app.session.as_ref().and_then(|s| match s.scope {
+        Scope::Flagged(_) => Some(format!("  drilling {}", s.scope.label())),
+        Scope::New(_) => Some("  learning new words".to_string()),
+        Scope::Due | Scope::More(_) => None,
+    });
 
     // What the active deck wants from you, carried on every screen.
     let mut right_spans = Vec::new();

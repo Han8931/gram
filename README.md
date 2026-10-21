@@ -74,7 +74,8 @@ your own list.
 
 Then press `s` to study, `space` to reveal, and `y` / `n` for *I know this* /
 *I don't know*. Missed words pick up a `★ marked` status you can drill with
-`M`. `?` shows every keybinding.
+`M`. When you would rather get on with new words than meet the backlog, `n` on
+the deck list teaches unseen ones only. `?` shows every keybinding.
 
 ## Deck status
 
@@ -99,6 +100,7 @@ Everything is modal and Vim-shaped.
 | `j` `k` `gg` `G` `5j` `5G` `Ctrl-d/u` `{` `}` | move — or scroll a long answer while reviewing |
 | `h` `l` `Enter` `q` `Esc` | back / forward |
 | `s` | study the selected deck |
+| `n` `30n` | learn new words only — a day's worth, or the count you type |
 | `space` | reveal the answer |
 | `y` / `n` | I know this / I don't know |
 | `1` `2` `3` `4` | Again / Hard / Good / Easy |
@@ -281,6 +283,7 @@ towards the schedule, study the deck with `s`, or drill a status with `M`.
 :status NAME            set this word's status (review|marked|test|none)
 :study NAME             drill one status
 :study more [N]         study N extra new cards today (default: a day's worth)
+:study new [N]          study N unseen words and nothing else (same default)
 :marked [NAME]          browse flagged words, or just one status
 :restore [N|FILE]       list kept collection backups, or put one back
 :study :browse :marked :stats :help
@@ -310,9 +313,17 @@ introduces at most `new_per_day` unseen cards per day, spread evenly through
 the day's review backlog rather than front-loaded.
 
 To push further on a given day, `:study more` runs the due cards plus another
-day's worth of new ones (at least 10), and `:study more 30` asks for exactly
-30 extra. It is a one-off: `new_per_day` stays as it was, and tomorrow's ration
-is the usual one. Use `:set new=N` to change the limit for good.
+day's worth of new ones, and `:study more 30` asks for exactly 30 extra. It is
+a one-off: `new_per_day` stays as it was, and tomorrow's ration is the usual
+one. Use `:set new=N` to change the limit for good.
+
+When the backlog is not what you want, `n` (or `:study new`, or `15n` for a
+size) leaves it alone and queues unseen words only — the day's ration is a
+default here, not a ceiling. Those words still enter the schedule, so they come
+back for review on their own; this chooses what you study now, not whether the
+schedule applies. Once a deck's ration is spent its `NEW` column reads `·`, so
+the deck list says how many words are still unseen rather than letting a
+half-learnt deck look finished.
 
 ### Changing `due` and `state`
 

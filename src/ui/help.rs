@@ -18,7 +18,13 @@ MOVING AROUND
 
 DECKS
   s              study the selected deck   a           add a card
+  n              learn new words only      30n         thirty of them
   Enter / l      browse its cards          dd          delete deck (confirms)
+
+  s studies what the schedule asks for: everything due today, with the day's
+  ration of unseen words mixed in. n skips the backlog and teaches new words
+  only — as many as `new_per_day`, or the count you type before it. Those
+  words still enter the schedule, so they come back for review later.
 
 BROWSING
   /text          jump to a word            n / N       next / previous match
@@ -158,6 +164,7 @@ COMMANDS
   :set voice=NAME                          the voice p speaks this deck in
   :study marked  drill one status          :marked NAME    browse one status
   :study more [N]                          N extra new cards, today only
+  :study new [N]                           N new words, no reviews
   :restore       list kept copies          :restore N      put one back
   :study :browse :marked :stats :help
 
@@ -175,7 +182,11 @@ SCHEDULING
   gram uses SM-2. Again resets the card and shows it again this session;
   Hard, Good and Easy push it further out, scaled by the card's ease factor.
   Each deck introduces at most `new_per_day` unseen cards per day;
-  :study more goes past that for today without changing the limit.
+  :study more goes past that for today without changing the limit, and
+  n / :study new teaches unseen words on their own, backlog and ration aside.
+  If the reviews are piling up faster than you want to meet them, raise the
+  ration with :set new=N — the words you learn today are what you review
+  tomorrow.
 
 CSV FORMAT
   Recognised headers, in any order:

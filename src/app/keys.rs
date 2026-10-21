@@ -396,6 +396,14 @@ impl App {
                     self.start_session(deck, Scope::Due);
                 }
             }
+            // On the deck list `n` means new words only — the backlog can wait.
+            KeyCode::Char('n') if self.screen == Screen::Decks => {
+                if let Some(deck) = self.active_deck() {
+                    let ration = self.new_ration(deck);
+                    let wanted = explicit.map_or(ration, |count| count as u32);
+                    self.start_session(deck, Scope::New(wanted));
+                }
+            }
             KeyCode::Char('M') => {
                 if let Some(deck) = self.active_deck() {
                     self.start_session(deck, Scope::Flagged(None));

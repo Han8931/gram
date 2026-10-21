@@ -110,6 +110,84 @@ fn only_study_more_takes_a_number() {
     assert!(app.session.is_none());
 }
 
+/// Turn the first `count` cards into reviews that fell due today.
+fn make_due_reviews(app: &mut App, count: usize) {
+    let today = app.today;
+    for card in app.db.decks[0].cards.iter_mut().take(count) {
+        card.state = CardState::Review;
+        card.due = today;
+        card.interval = 1;
+    }
+}
+
+#[test]
+fn study_new_leaves_the_review_backlog_alone() {
+    let mut app = app_with_cards(10);
+    make_due_reviews(&mut app, 6);
+    assert_eq!(app.build_queue(DECK, Scope::Due).len(), 10, "6 due + 4 new");
+    let queue = app.build_queue(DECK, Scope::New(20));
+    assert_eq!(queue.len(), 4);
+    for id in queue {
+        let card = app.db.decks[0].card(id).expect("queued card");
+        assert_eq!(card.state, CardState::New, "{} is not unseen", card.term);
+    }
+}
+
+#[test]
+fn study_new_is_not_capped_by_the_days_ration() {
+    let mut app = app_with_cards(10);
+    app.db.decks[0].new_per_day = 3;
+    app.db.decks[0].spend_new(app.today, 3);
+    assert!(app.build_queue(DECK, Scope::Due).is_empty());
+    assert_eq!(app.build_queue(DECK, Scope::New(6)).len(), 6);
+}
+
+#[test]
+fn study_new_takes_a_count_and_defaults_to_a_ration() {
+    let mut app = app_with_cards(30);
+    app.db.decks[0].new_per_day = 12;
+    app.run_command("study new 5");
+    assert_eq!(app.session.as_ref().unwrap().queue.len(), 5);
+    app.run_command("study new");
+    assert_eq!(app.session.as_ref().unwrap().queue.len(), 12);
+    assert_eq!(app.db.decks[0].new_per_day, 12, "the limit is untouched");
+}
+
+#[test]
+fn study_new_suspends_nothing_and_skips_suspended() {
+    let mut app = app_with_cards(4);
+    app.db.decks[0].cards[0].suspended = true;
+    assert_eq!(app.build_queue(DECK, Scope::New(10)).len(), 3);
+}
+
+#[test]
+fn n_on_the_deck_list_studies_new_words() {
+    let mut app = app_with_cards(30);
+    app.db.decks[0].new_per_day = 8;
+    app.on_key(key('n')).expect("key");
+    let session = app.session.as_ref().expect("session");
+    assert_eq!(session.scope, Scope::New(8));
+    assert_eq!(session.queue.len(), 8);
+    // A count says how many: `15n`.
+    app.on_key(key('q')).expect("key");
+    app.on_key(key('1')).expect("key");
+    app.on_key(key('5')).expect("key");
+    app.on_key(key('n')).expect("key");
+    assert_eq!(app.session.as_ref().expect("session").queue.len(), 15);
+}
+
+#[test]
+fn new_words_answered_count_against_the_days_ration() {
+    let mut app = app_with_cards(10);
+    app.db.decks[0].new_per_day = 4;
+    app.run_command("study new 2");
+    for _ in 0..2 {
+        app.reveal();
+        app.answer(Grade::Good);
+    }
+    assert_eq!(app.db.decks[0].new_allowance(app.today), 2);
+}
+
 #[test]
 fn answering_good_advances_the_queue_and_logs() {
     let mut app = app_with_cards(3);
@@ -2015,4 +2093,21 @@ fn snapshots_leave_the_review_log_out() {
     assert!(app.undo.last().is_some_and(|step| step.db.log.is_empty()));
     app.on_key(key('u')).unwrap();
     assert_eq!(app.db.log.len(), 2, "undo keeps the log it found");
+}
+
+#[test]
+fn the_deck_list_says_how_many_words_are_still_unseen() {
+    let mut app = app_with_cards(40);
+    app.db.decks[0].new_per_day = 5;
+    let screen = screen_text(&mut app, 100, 12);
+    assert!(
+        !screen.contains("unseen — n to learn"),
+        "today's ration is still waiting, so NEW already says so:\n{screen}"
+    );
+    app.db.decks[0].spend_new(app.today, 5);
+    let screen = screen_text(&mut app, 100, 12);
+    assert!(
+        screen.contains("40 unseen — n to learn"),
+        "a spent ration should not read as a finished deck:\n{screen}"
+    );
 }

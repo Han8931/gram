@@ -163,6 +163,10 @@ pub enum Scope {
     /// Like `Due`, with this many new cards on top of the day's ration — a
     /// one-off for a day you want to push further, leaving `new_per_day` be.
     More(u32),
+    /// This many unseen cards and nothing else: no review backlog, no daily
+    /// ration in the way. For when you want to get on with learning words
+    /// rather than going back over the ones you already know.
+    New(u32),
     /// Words carrying a status, regardless of when they are next due.
     /// `None` means any status at all.
     Flagged(Option<Study>),
@@ -173,6 +177,7 @@ impl Scope {
         match self {
             Self::Due => "due",
             Self::More(_) => "more",
+            Self::New(_) => "new",
             Self::Flagged(None) => "flagged",
             Self::Flagged(Some(status)) => status.label(),
         }
@@ -181,6 +186,7 @@ impl Scope {
     fn matches(self, card: &Card) -> bool {
         match self {
             Self::Due | Self::More(_) => true,
+            Self::New(_) => card.state == CardState::New,
             Self::Flagged(None) => card.is_flagged(),
             Self::Flagged(Some(status)) => card.status == status,
         }

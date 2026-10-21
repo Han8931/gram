@@ -22,6 +22,20 @@ impl App {
             return flagged.into();
         }
 
+        // New words only: the review backlog stays where it is, and the day's
+        // ration is not a ceiling — you asked for these on purpose.
+        if let Scope::New(limit) = scope {
+            let mut fresh: Vec<u64> = deck
+                .cards
+                .iter()
+                .filter(|c| !c.suspended && scope.matches(c))
+                .map(|c| c.id)
+                .take(limit as usize)
+                .collect();
+            self.rng.shuffle(&mut fresh);
+            return fresh.into();
+        }
+
         let mut due: Vec<u64> = deck
             .cards
             .iter()
@@ -58,6 +72,16 @@ impl App {
         queue.into()
     }
 
+    /// A day's worth of new cards for this deck — what `n`, `:study new` and
+    /// `:study more` ask for when you do not say how many. A deck set to
+    /// introduce nothing still owes an explicit request some words.
+    pub(super) fn new_ration(&self, deck_id: u64) -> u32 {
+        match self.db.deck_by_id(deck_id).map_or(0, |d| d.new_per_day) {
+            0 => 10,
+            ration => ration,
+        }
+    }
+
     pub fn start_session(&mut self, deck_id: u64, scope: Scope) {
         let queue = self.build_queue(deck_id, scope);
         if queue.is_empty() {
@@ -67,10 +91,11 @@ impl App {
                 .map(|d| d.name.clone())
                 .unwrap_or_default();
             self.info(match scope {
-                Scope::Due => format!(
-                    "{name}: nothing due — come back tomorrow, or :study more for extra new cards"
-                ),
+                Scope::Due => {
+                    format!("{name}: nothing due — come back tomorrow, or n for new words")
+                }
                 Scope::More(_) => format!("{name}: nothing due and no unseen cards left"),
+                Scope::New(_) => format!("{name}: every word has been seen — nothing new left"),
                 Scope::Flagged(None) => {
                     format!("{name}: no words have a status — press m to set one")
                 }
@@ -97,6 +122,7 @@ impl App {
         self.screen = Screen::Review;
         self.info(match scope {
             Scope::Due | Scope::More(_) => format!("studying {initial} cards — space to reveal"),
+            Scope::New(_) => format!("{initial} new words — space to reveal"),
             Scope::Flagged(_) => format!(
                 "drilling {initial} {} words — space to reveal",
                 scope.label()

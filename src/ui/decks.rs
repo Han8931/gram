@@ -79,10 +79,23 @@ pub(super) fn render_decks(frame: &mut Frame, app: &mut App, area: Rect) {
                 } else {
                     Span::styled(format!("{:>5}", "·"), Style::default().fg(DIM))
                 },
+                // Padded to the widest label, so whatever follows it down the
+                // list lines up.
                 Span::styled(
-                    format!("  {}", status.label()),
+                    format!("  {}", pad(status.label(), 14)),
                     Style::default().fg(status_color(status)).bold(),
                 ),
+                // Once the day's ration is spent the NEW column reads `·`,
+                // which would otherwise look like a deck you had finished.
+                // Say how much of it is still unlearnt, and that n gets at it.
+                if counts.new == 0 && counts.unseen > 0 {
+                    Span::styled(
+                        format!("{} unseen — n to learn", counts.unseen),
+                        Style::default().fg(DIM),
+                    )
+                } else {
+                    Span::raw("")
+                },
                 if counts.suspended > 0 {
                     Span::styled(
                         format!("  ({} suspended)", counts.suspended),

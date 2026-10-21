@@ -453,6 +453,7 @@ impl Deck {
                 _ => {}
             }
         }
+        counts.unseen = counts.new;
         counts.new = counts.new.min(self.new_allowance(today) as usize);
         counts
     }
@@ -461,12 +462,17 @@ impl Deck {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DeckCounts {
     pub total: usize,
+    /// Unseen words today's session will introduce: the ration, or however
+    /// many are left of it.
     pub new: usize,
     pub learning: usize,
     pub due: usize,
     pub suspended: usize,
     /// Words carrying any status at all.
     pub flagged: usize,
+    /// Every word never seen, the daily ration aside — the pool `new` is
+    /// drawn from, and how much of the deck is still ahead of you.
+    pub unseen: usize,
 }
 
 impl DeckCounts {

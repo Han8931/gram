@@ -240,40 +240,40 @@ impl App {
                     Some((name, count)) => (name, Some(count.trim())),
                     None => (rest, None),
                 };
-                if count.is_some() && !matches!(name, "more" | "extra") {
+                if count.is_some() && !matches!(name, "more" | "extra" | "new" | "unseen") {
                     self.error(format!(
-                        "only :study more takes a number, not :study {name}"
+                        "only :study more and :study new take a number, not :study {name}"
                     ));
                     return;
                 }
+                // How many new cards `:study more` and `:study new` ask for:
+                // the number you gave, or a day's ration of them. The guard
+                // above means only those two can have given one.
+                let how_many = match count {
+                    Some(count) => match count.parse::<u32>() {
+                        Ok(amount) if amount > 0 => amount,
+                        _ => {
+                            self.error(format!("not a positive number: {count}"));
+                            return;
+                        }
+                    },
+                    None => self.active_deck().map_or(10, |id| self.new_ration(id)),
+                };
                 let scope = match name {
                     "" | "due" => Scope::Due,
                     // `:study more` adds another day's ration; `:study more 30`
                     // says how many.
-                    "more" | "extra" => {
-                        let extra = match count {
-                            Some(count) => match count.parse::<u32>() {
-                                Ok(extra) if extra > 0 => extra,
-                                _ => {
-                                    self.error(format!("not a positive number: {count}"));
-                                    return;
-                                }
-                            },
-                            None => self
-                                .active_deck()
-                                .and_then(|id| self.db.deck_by_id(id))
-                                .map_or(0, |deck| deck.new_per_day)
-                                .max(10),
-                        };
-                        Scope::More(extra)
-                    }
+                    "more" | "extra" => Scope::More(how_many),
+                    // `:study new` leaves the backlog alone and teaches words
+                    // you have not seen yet.
+                    "new" | "unseen" => Scope::New(how_many),
                     "flagged" | "all" => Scope::Flagged(None),
                     other => match Study::parse(other) {
                         Some(Study::None) => Scope::Flagged(None),
                         Some(status) => Scope::Flagged(Some(status)),
                         None => {
                             self.error(format!(
-                                "unknown study scope: {other} (try: due, more, flagged, review, marked, test)"
+                                "unknown study scope: {other} (try: due, new, more, flagged, review, marked, test)"
                             ));
                             return;
                         }

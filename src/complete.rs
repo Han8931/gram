@@ -22,7 +22,7 @@ pub const COMMANDS: &[&str] = &[
 const STATUSES: &[&str] = &["marked", "none", "review", "test"];
 
 /// Scopes for `:study`.
-const SCOPES: &[&str] = &["due", "flagged", "marked", "more", "review", "test"];
+const SCOPES: &[&str] = &["due", "flagged", "marked", "more", "new", "review", "test"];
 
 /// Settings for `:set`, written as the `key=` they are typed with.
 const SETTINGS: &[&str] = &["grading=", "new=", "reverse=", "voice="];

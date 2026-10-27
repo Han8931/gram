@@ -1,8 +1,10 @@
 /target
+sources/
 
 # The books themselves are never redistributed. The decks extracted from them
 # are tracked, so keep this repository private.
 *.epub
+*.pdf
 
 __pycache__/
 

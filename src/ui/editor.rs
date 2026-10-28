@@ -29,9 +29,16 @@ pub(super) fn field_heights(available: u16, needs: [u16; FIELDS.len()]) -> [u16;
 }
 
 /// A field's value laid out for display: the `\n` the editor shows for a
-/// newline breaks the line, anything wider than `width` columns word-wraps,
-/// and each display line remembers which cluster of the value it starts at —
-/// which is what puts the cursor in the right place.
+/// newline breaks the line and stays visible at the end of it, anything wider
+/// than `width` columns word-wraps, and each display line remembers which
+/// cluster of the value it starts at — which is what puts the cursor in the
+/// right place.
+///
+/// The marker is kept rather than hidden because the cursor counts the value's
+/// characters: with nothing drawn for its two, the cursor stalled for a press
+/// on each in blank space past the end of the line, and `x` there took half an
+/// escape and turned the break into a stray `n`. It also tells an explicit
+/// break apart from a line that merely wrapped.
 pub(super) fn wrap_field(value: &str, width: usize) -> Vec<(String, usize)> {
     let width = width.max(1);
     // Clusters, not characters: the cursor counts in the same units, and a
@@ -79,6 +86,15 @@ pub(super) fn wrap_field(value: &str, width: usize) -> Vec<(String, usize)> {
             continue;
         }
         if parts[index].chars().all(char::is_whitespace) {
+            // A space at the very start of the value joins no two words, so
+            // the wrap will not put it back: keep it, or the cursor has
+            // nowhere to sit while you type one.
+            if pieces.is_empty() && word.is_empty() {
+                word_at = index;
+                word.push_str(parts[index]);
+                index += 1;
+                continue;
+            }
             flush(&mut word, word_at, &mut pieces);
             index += 1;
             continue;
@@ -98,6 +114,10 @@ pub(super) fn wrap_field(value: &str, width: usize) -> Vec<(String, usize)> {
     for piece in pieces {
         match piece {
             Piece::Break(next) => {
+                // The two characters of the marker end this line, whatever
+                // that does to its width: that is where they are in the value,
+                // and the cursor goes by the value.
+                line.push_str("\\n");
                 lines.push((std::mem::take(&mut line), start));
                 start = next;
             }
@@ -142,9 +162,15 @@ pub(super) fn cursor_at(lines: &[(String, usize)], cursor: usize) -> (usize, usi
         if cursor >= *start {
             // The column is how wide the line is up to the cursor, which is
             // not how many clusters that is.
-            let into = (cursor - start).min(util::cluster_count(text));
+            let into = cursor - start;
             let head: String = util::clusters(text).take(into).collect();
-            return (row, util::width(&head));
+            // Wrapping rebuilds lines with single spaces, so the space that
+            // ends a line, or trails the value, is laid out as nothing. The
+            // cursor still passes over it, and a space is one column: without
+            // this, typing one at the end of a field left the cursor parked
+            // where it was and the next letter jumped two columns.
+            let dropped = into.saturating_sub(util::cluster_count(text));
+            return (row, util::width(&head) + dropped);
         }
     }
     (0, 0)

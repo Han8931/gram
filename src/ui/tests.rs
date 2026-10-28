@@ -170,7 +170,11 @@ fn a_field_wraps_at_spaces_and_at_escaped_newlines() {
 
     let lines = wrap_field("one\\ntwo", 40);
     let text: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
-    assert_eq!(text, vec!["one", "two"], "the editor's \\n breaks the line");
+    assert_eq!(
+        text,
+        vec!["one\\n", "two"],
+        "the editor's \\n breaks the line and stays on the end of it"
+    );
 
     let lines = wrap_field("antidisestablishmentarianism", 10);
     assert_eq!(lines.len(), 3, "a long word is broken rather than hidden");
@@ -182,6 +186,41 @@ fn a_field_wraps_at_spaces_and_at_escaped_newlines() {
     let lines = wrap_field("one\\\\ntwo", 40);
     let text: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
     assert_eq!(text, vec!["one\\\\ntwo"], "one line, not two");
+}
+
+#[test]
+fn every_character_of_a_field_has_a_cell_of_its_own() {
+    // The cursor counts the value's characters while the field is laid out
+    // for display, so the two have to agree: any value character the layout
+    // draws nothing for is a cell two cursor positions share, which reads as
+    // the cursor refusing to move. Typing a space used to do exactly that.
+    for (value, width) in [
+        ("to make ashamed", 40),
+        ("a definition that is long enough to wrap twice over", 20),
+        ("trailing space ", 40),
+        ("two  spaces", 40),
+        (" leading space", 40),
+        ("one\\ntwo\\nthree", 40),
+        ("ends with a break\\n", 40),
+        ("\\nopens with one", 40),
+        ("한국어 공부합니다 and some english", 12),
+        ("antidisestablishmentarianism", 10),
+        ("", 40),
+    ] {
+        let lines = wrap_field(value, width);
+        let mut seen: Vec<((usize, usize), usize)> = Vec::new();
+        for cursor in 0..=util::cluster_count(value) {
+            let at = cursor_at(&lines, cursor);
+            if let Some((_, other)) = seen.iter().find(|(cell, _)| *cell == at) {
+                panic!(
+                    "{value:?} at width {width}: characters {other} and {cursor} \
+                     both sit at row {} column {} — {lines:?}",
+                    at.0, at.1
+                );
+            }
+            seen.push((at, cursor));
+        }
+    }
 }
 
 #[test]
@@ -233,9 +272,26 @@ fn the_cursor_follows_the_text_onto_the_next_line() {
         "past the last character, where insert mode leaves it"
     );
 
-    // A break the editor made itself puts the cursor on the new line.
-    let lines = wrap_field("one\\ntwo", 40);
-    assert_eq!(cursor_at(&lines, 5), (1, 0), "the n of \\n is not text");
+    // Across an explicit break, every character of the value has a cell of
+    // its own — including the two the marker is written with, which is what
+    // keeps the cursor moving on every press.
+    let value = "one\\ntwo";
+    let lines = wrap_field(value, 40);
+    assert_eq!(cursor_at(&lines, 3), (0, 3), "on the backslash");
+    assert_eq!(cursor_at(&lines, 4), (0, 4), "on its n");
+    assert_eq!(cursor_at(&lines, 5), (1, 0), "the line the break opened");
+
+    let cells: Vec<(usize, usize)> = (0..util::cluster_count(value))
+        .map(|cursor| cursor_at(&lines, cursor))
+        .collect();
+    let mut sorted = cells.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        cells.len(),
+        "no two positions share a cell: {cells:?}"
+    );
 }
 
 #[test]

@@ -61,6 +61,17 @@ pub(super) fn wrap_field(value: &str, width: usize) -> Vec<(String, usize)> {
         }
     };
     while index < parts.len() {
+        // An escaped backslash is two characters of one word, not the start of
+        // a break: `\\n` is a literal backslash and an n, and the `\n` that
+        // follows it is not a newline.
+        if parts[index] == "\\" && parts.get(index + 1) == Some(&"\\") {
+            if word.is_empty() {
+                word_at = index;
+            }
+            word.push_str("\\\\");
+            index += 2;
+            continue;
+        }
         if parts[index] == "\\" && parts.get(index + 1) == Some(&"n") {
             flush(&mut word, word_at, &mut pieces);
             index += 2;

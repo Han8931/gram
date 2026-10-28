@@ -176,6 +176,12 @@ fn a_field_wraps_at_spaces_and_at_escaped_newlines() {
     assert_eq!(lines.len(), 3, "a long word is broken rather than hidden");
     let rebuilt: String = lines.iter().map(|(t, _)| t.as_str()).collect();
     assert_eq!(rebuilt, "antidisestablishmentarianism");
+
+    // A card holding a literal backslash and an n: `\\n` is that backslash,
+    // and the n after it is a letter, not half of a line break.
+    let lines = wrap_field("one\\\\ntwo", 40);
+    let text: Vec<&str> = lines.iter().map(|(t, _)| t.as_str()).collect();
+    assert_eq!(text, vec!["one\\\\ntwo"], "one line, not two");
 }
 
 #[test]

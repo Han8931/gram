@@ -137,6 +137,7 @@ GRADING MODES
 
 EDITING A CARD
   Tab / j / k    next / previous field     i a I A     insert / append
+  Up / Down      next / previous field, while still typing
   Esc            leave insert mode         h l 0 $ w b cursor motions
   x D C          delete char / to end      dd          clear the field
   ZZ / Ctrl-s    save the card             q / Esc     cancel

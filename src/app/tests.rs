@@ -2111,3 +2111,153 @@ fn the_deck_list_says_how_many_words_are_still_unseen() {
         "a spent ration should not read as a finished deck:\n{screen}"
     );
 }
+
+/// What the focused field holds, and where its cursor sits.
+fn field_state(app: &App) -> (&str, usize) {
+    let editor = app.editor.as_ref().expect("editor open");
+    let field = &editor.fields[editor.field];
+    (field.value(), field.cursor())
+}
+
+#[test]
+fn editing_opens_with_the_cursor_on_a_character() {
+    // The cursor used to open one past the last character, where `x` and `D`
+    // have nothing under them: the first keystroke of an edit was swallowed.
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.on_key(key('i')).unwrap();
+    assert_eq!(app.mode, Mode::Normal);
+    assert_eq!(field_state(&app), ("term0", 4));
+
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app), ("term", 3), "x bites on the first press");
+}
+
+#[test]
+fn x_keeps_deleting_at_the_end_of_a_field() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.on_key(key('i')).unwrap();
+    for expected in ["term", "ter", "te", "t", ""] {
+        app.on_key(key('x')).unwrap();
+        assert_eq!(field_state(&app).0, expected);
+    }
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app), ("", 0), "and stops at an empty field");
+}
+
+#[test]
+fn moving_between_fields_keeps_the_cursor_on_a_character() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.on_key(key('i')).unwrap();
+    // Term, Pron, Pos, then Definition.
+    for _ in 0..3 {
+        app.on_key(key('j')).unwrap();
+    }
+    assert_eq!(field_state(&app), ("definition 0", 11));
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app).0, "definition ");
+
+    press(&mut app, KeyCode::BackTab);
+    press(&mut app, KeyCode::Tab);
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app).0, "definition", "Tab clamps too");
+}
+
+#[test]
+fn leaving_insert_mode_then_wandering_fields_still_deletes() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.on_key(key('i')).unwrap();
+    app.on_key(key('A')).unwrap();
+    assert_eq!(app.mode, Mode::Insert);
+    for ch in "ish".chars() {
+        app.on_key(key(ch)).unwrap();
+    }
+    press(&mut app, KeyCode::Esc);
+    assert_eq!(field_state(&app), ("term0ish", 7));
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app).0, "term0is");
+}
+
+#[test]
+fn w_and_d_leave_the_cursor_where_vim_does() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.db.decks[0].cards[0].definition = "to make ashamed".into();
+    app.refresh_rows();
+    app.on_key(key('i')).unwrap();
+    for _ in 0..3 {
+        app.on_key(key('j')).unwrap();
+    }
+    app.on_key(key('0')).unwrap();
+    app.on_key(key('w')).unwrap();
+    app.on_key(key('w')).unwrap();
+    assert_eq!(field_state(&app), ("to make ashamed", 8));
+    app.on_key(key('w')).unwrap();
+    assert_eq!(field_state(&app).1, 14, "w stops on the last character");
+
+    app.on_key(key('0')).unwrap();
+    app.on_key(key('w')).unwrap();
+    app.on_key(key('D')).unwrap();
+    assert_eq!(field_state(&app), ("to ", 2), "D leaves the cursor on text");
+    app.on_key(key('x')).unwrap();
+    assert_eq!(field_state(&app).0, "to");
+}
+
+#[test]
+fn arrows_move_between_fields_without_leaving_insert_mode() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.on_key(key('a')).unwrap();
+    assert_eq!(app.mode, Mode::Insert);
+    for ch in "zeal".chars() {
+        app.on_key(key(ch)).unwrap();
+    }
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    press(&mut app, KeyCode::Down);
+    assert_eq!(app.mode, Mode::Insert, "still typing");
+    assert_eq!(app.editor.as_ref().unwrap().field, 3, "on the definition");
+    for ch in "eagerness".chars() {
+        app.on_key(key(ch)).unwrap();
+    }
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Up);
+    press(&mut app, KeyCode::Up);
+    assert_eq!(
+        field_state(&app),
+        ("zeal", 4),
+        "back on the term, at its end"
+    );
+}
+
+#[test]
+fn a_failed_save_does_not_write_the_collection() {
+    let mut app = app_with_cards(1);
+    app.enter_browse(DECK);
+    app.open_new_card();
+    app.field_mut(|f| f.insert_str("lonely"));
+    // ZZ with no definition: the editor stays open and nothing is written,
+    // so the complaint about it is still on screen.
+    press(&mut app, KeyCode::Esc);
+    app.on_key(key('Z')).unwrap();
+    app.on_key(key('Z')).unwrap();
+    assert!(app.editor.is_some());
+    assert!(app.status.error, "{}", app.status.text);
+    assert!(!app.path.exists(), "nothing saved");
+}
+
+#[test]
+fn a_half_typed_operator_does_not_escape_the_editor() {
+    let mut app = app_with_cards(2);
+    app.enter_browse(DECK);
+    app.on_key(key('i')).unwrap();
+    app.on_key(key('d')).unwrap();
+    assert_eq!(app.pending, Some('d'));
+    app.on_key(key('q')).unwrap();
+    assert_eq!(app.pending, None, "cancelling the editor cancels the dd");
+    app.on_key(key('d')).unwrap();
+    assert_eq!(app.db.decks[0].cards.len(), 2, "no card deleted");
+}

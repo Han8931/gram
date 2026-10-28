@@ -117,6 +117,7 @@ impl App {
 
         self.editor = None;
         self.mode = Mode::Normal;
+        self.pending = None;
         self.dirty = true;
         self.refresh_rows();
         true
@@ -125,6 +126,9 @@ impl App {
     pub(super) fn close_editor(&mut self) {
         self.editor = None;
         self.mode = Mode::Normal;
+        // Half-typed operator: `d` then q must not leave a `d` waiting for
+        // the next key the browser gets.
+        self.pending = None;
         self.info("cancelled");
     }
 
@@ -159,20 +163,17 @@ impl App {
         // Keys that behave the same in both modes.
         match key.code {
             KeyCode::Tab => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = (editor.field + 1) % fields;
-                }
+                self.focus_field(|field| (field + 1) % fields);
                 return;
             }
             KeyCode::BackTab => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = (editor.field + fields - 1) % fields;
-                }
+                self.focus_field(|field| (field + fields - 1) % fields);
                 return;
             }
             KeyCode::Char('s') if ctrl => {
-                self.commit_editor();
-                self.autosave();
+                if self.commit_editor() {
+                    self.autosave();
+                }
                 return;
             }
             _ => {}
@@ -180,18 +181,19 @@ impl App {
 
         if insert {
             match key.code {
-                KeyCode::Char('c') if ctrl => {
-                    self.mode = Mode::Normal;
-                    if let Some(editor) = self.editor.as_mut() {
-                        editor.current_mut().clamp_normal();
-                    }
-                }
+                // Ctrl-C leaves insert mode the way Esc does, as in Vim.
                 KeyCode::Esc => {
                     self.mode = Mode::Normal;
-                    if let Some(editor) = self.editor.as_mut() {
-                        editor.current_mut().clamp_normal();
-                    }
+                    self.field_mut(|f| f.clamp_normal());
                 }
+                KeyCode::Char('c') if ctrl => {
+                    self.mode = Mode::Normal;
+                    self.field_mut(|f| f.clamp_normal());
+                }
+                // The arrows move within a field; up and down leave it, the
+                // way Tab does, rather than doing nothing at all.
+                KeyCode::Down => self.focus_field(|field| (field + 1) % fields),
+                KeyCode::Up => self.focus_field(|field| (field + fields - 1) % fields),
                 KeyCode::Enter => {
                     if let Some(editor) = self.editor.as_mut() {
                         if editor.field + 1 < fields {
@@ -222,18 +224,10 @@ impl App {
             (Some('d'), KeyCode::Char('d')) => self.field_mut(|f| {
                 f.clear();
             }),
-            (Some('g'), KeyCode::Char('g')) => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = 0;
-                }
-            }
+            (Some('g'), KeyCode::Char('g')) => self.focus_field(|_| 0),
             (_, KeyCode::Char('d')) => self.pending = Some('d'),
             (_, KeyCode::Char('g')) => self.pending = Some('g'),
-            (_, KeyCode::Char('G')) => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = fields - 1;
-                }
-            }
+            (_, KeyCode::Char('G')) => self.focus_field(|_| fields - 1),
             (_, KeyCode::Char('i')) => self.mode = Mode::Insert,
             (_, KeyCode::Char('a')) => {
                 self.field_mut(|f| f.right(true));
@@ -260,19 +254,16 @@ impl App {
             (_, KeyCode::Char('w')) => self.field_mut(|f| f.word_forward()),
             (_, KeyCode::Char('b')) => self.field_mut(|f| f.word_back()),
             (_, KeyCode::Char('j')) | (_, KeyCode::Down) | (_, KeyCode::Enter) => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = (editor.field + 1) % fields;
-                }
+                self.focus_field(|field| (field + 1) % fields)
             }
             (_, KeyCode::Char('k')) | (_, KeyCode::Up) => {
-                if let Some(editor) = self.editor.as_mut() {
-                    editor.field = (editor.field + fields - 1) % fields;
-                }
+                self.focus_field(|field| (field + fields - 1) % fields)
             }
             (_, KeyCode::Char('Z')) => {
                 if pending == Some('Z') {
-                    self.commit_editor();
-                    self.autosave();
+                    if self.commit_editor() {
+                        self.autosave();
+                    }
                 } else {
                     self.pending = Some('Z');
                 }
@@ -284,11 +275,32 @@ impl App {
             (_, KeyCode::Char('q')) | (_, KeyCode::Esc) => self.close_editor(),
             _ => {}
         }
+
+        // A delete or a motion can leave the cursor past the last character —
+        // `x` on the final letter, `D`, `w` on the last word. Vim pulls it
+        // back onto a character, and so must this: a stranded cursor leaves
+        // `x` and `D` with nothing under them, so the next press does nothing.
+        if self.mode == Mode::Normal {
+            self.field_mut(|f| f.clamp_normal());
+        }
     }
 
     pub(super) fn field_mut(&mut self, f: impl FnOnce(&mut TextInput)) {
         if let Some(editor) = self.editor.as_mut() {
             f(editor.current_mut());
+        }
+    }
+
+    /// Move to another field, keeping the cursor on a character when the move
+    /// lands in normal mode — each field carries its own cursor, so the one
+    /// arrived at needs the same clamp as the one left behind.
+    fn focus_field(&mut self, to: impl FnOnce(usize) -> usize) {
+        let normal = self.mode == Mode::Normal;
+        if let Some(editor) = self.editor.as_mut() {
+            editor.field = to(editor.field);
+            if normal {
+                editor.current_mut().clamp_normal();
+            }
         }
     }
 }

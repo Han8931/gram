@@ -113,7 +113,16 @@ impl Editor {
                 deck,
                 card: card.id,
             },
-            fields: values.iter().map(|v| TextInput::new(escape(v))).collect(),
+            fields: values
+                .iter()
+                .map(|v| {
+                    let mut field = TextInput::new(escape(v));
+                    // An existing card opens in normal mode, where the cursor
+                    // sits on a character rather than past the last one.
+                    field.clamp_normal();
+                    field
+                })
+                .collect(),
             field: 0,
         }
     }
